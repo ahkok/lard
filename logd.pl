@@ -296,7 +296,7 @@ sub rotate_file {
 	if ( -f "$file" ) {
 		rename "$file", "$file.1";
 		# and compress it
-		if (fork == 0) {
+		if (( $compress ne "none" ) && (fork == 0)) {
 			exec("$compress $file.1");
 		}
 	}
