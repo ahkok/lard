@@ -1,0 +1,170 @@
+
+=head1 NAME
+
+lard.conf - lard configuration file
+
+=head1 SYNOPSIS
+
+This configuration file is read by lard(8) on startup.
+
+The configuration file consists of B<keyword> - B<value> pairs describing
+logfiles and options.
+
+=head2 Global options
+
+Global options describe parameters that only make sens in a global context,
+like B<listen> and B<socket>. All other options are default parameters
+for the logging rules.
+
+The global section is defined as everything up to the first B<rule>. A
+rule starts with one of the following keywords: B<file>, B<pipe>,
+B<command> or B<host>. Once any of these keywords is encountered,
+all keywords are assiciated with this rule-starting keyword, until
+a new rule-starting keyword is encountered.
+
+=over 4
+
+=item B<listen> {IP address|IP addres:port}
+
+Define the IP address and optionally the UDP port where the daemon
+will listen on in remote reception mode (B<-r>).
+
+=item B<socket> {filename}
+
+Define an alternative UNIX socket to look for incoming local syslog
+messages instead of '/dev/log'/
+
+=back
+
+=head2 Rules
+
+A (new) rule starts with a rule-starting keyword as described above.
+This rule inherits default values for globally defined parameters such
+as B<keep>, B<rotate>, and B<compress>. Locally defined options
+override any globally defined ones. Some of these parameters
+have system defaults.
+
+=over 4
+
+=item B<file> {filename}
+
+Define a new rule that will append messages into a logfile.
+
+=item B<pipe> {pipename}
+
+Define a new rule that will keep a pipe open and write messages
+into it.
+
+=item B<command> {command}
+
+Define a new rule that will spawn a command for every message
+that matches the logging criteria. The message is passed as
+commandline parameter to the command. This may be unsafe!
+
+=item B<host> {hostname}
+
+Define a new rule that sends matching messages to a remote
+logging host.
+
+=item B<rotate> {"hourly"|"daily"|"weekly"|"monthly"|[size]}
+
+This option describes when a logfile needs to be rotated and only
+applies to the B<file> rule.
+
+=item B<keep> {number}
+
+Define the number of old logfiles to keep before deleting the oldest
+one during rotation.
+
+=item B<compress> {"gzip"|"bzip2"|"none"}
+
+Define the type of compression used to compress logfiles when
+they are rotated. "none" means no compression.
+
+=item B<log> {facility.priority}
+
+Define which facility and priority must be matched on this rule.
+A '*' for the priority or facility means "all", such that:
+
+    *.*
+
+would match all incoming messages of all facilities and priorities.
+
+A facility may be a comma-separated list of multiple facilities:
+
+    local0,local1,local3.*
+
+And even so for the priority:
+
+    *.debug,info
+
+A facility or priority may even be negated with a '!' character,
+which results in the rule NOT matching that priority/facility:
+
+    *.!debug
+
+For a list of facilites and priorities, see syslog(8).
+
+=item B<match> {expression}
+
+On top of the priority and facility, a message must also match
+this regular expression. The expression can include perl-like
+regular expression directly. The following example would match
+all messages that appear to be coming from the ssh daemon:
+
+    match " sshd\[\d+\]: "
+
+=item B<format> {format-string}
+
+The format string allows you to specify an alternative message
+layout. The layout is a string with keywords that will be
+substituted for every message:
+
+    format "%{TIMESTAMP} %{HOSTNAME} %{MSG}\n"
+
+The %{keyword} words have specific meaning of course.
+
+    %{TIMESTAMP} - the time the message was sent
+    %{HOSTNAME} - the originating hostname of a message
+    %{MSG} - the message data
+    %{facility} - the message facility printed out
+    %{priority} - the message priority printed out
+
+The following fields are also available but should be used with
+caution:
+
+    %{facility_code} - the facility code (binary)
+    %{priority_code} - the priority code (binary)
+    %{raw} - the full raw message
+    %{time_recv} - the time received
+    %{length} - length of the raw message
+    %{HEADER} - the full original header
+    %{peerhost} - the sending hostname
+    %{peerport} - port that the sending host used
+    %{PRI} - encoded priority/facility data
+    %{TIME} - time received in UNIX time
+
+=item B<timeformat> {timeformat}
+
+Define a format to use to print the time in a message. This follows
+the syntax that date(1) also uses. Example:
+
+    # stock syslogd uses:
+    timeformat "%b %e %H:%M:%S"
+
+=back
+
+=head1 SEE ALSO
+
+lard(8), lard.conf(5), [RFC 3164]
+
+=head1 AUTHOR
+
+lard was written by Auke Kok, http://lard.foo-projects.org/
+
+=head1 COPYRIGHT
+
+The author disclaims all copyrights and releases this document into the
+public domain.
+
+=cut
