@@ -685,7 +685,7 @@ sub write_message {
 						} else {
 							# very bad writing below
 							local *LOG;
-							open ( LOG, ">>${$rule}{'file'}" );
+							open ( LOG, ">>${$rule}{'file'}" ) or die "error: cannot open \"${$rule}{'file'}\" for writing";
 							print LOG $output;
 							close ( LOG );
 						}
