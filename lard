@@ -126,19 +126,9 @@ my $VERSION;
 ( $VERSION = '$Revision: 2.1 $ ' ) =~ s/[^0-9.]//g;
 
 # parse command-line options
-getopts 'h?lnvb:p:', \%opts;
+getopts 'h?rns', \%opts;
 
 print_help() if exists $opts{'h'} or exists $opts{'?'};
-
-# list known elements might be in %message for templating needs
-if ( $opts{'l'} ) {
-	print join(
-		"\n",
-		qw{raw MSG time_recv TIME TIMESTAMP priority length HOSTNAME facility facility_code peerport HEADER priority_code peerhost PRI}
-	 ),
-		"\n";
-	exit;
-}
 
 &parse_config();
 
@@ -149,24 +139,34 @@ for my $rule (@rules) {
 	print "\n";
 }
 
-# no input checking as let IO::Socket handle any errors
-my (@bind) = ( 'LocalAddr', $opts{'b'} ) if exists $opts{'b'};
-$port = $opts{'p'} if exists $opts{'p'};
-
-##$SIG{'INT'} = sub { exit 0 };	# control+c handler
-
 # start up the syslog server
 
 # listen on the UDP socket
-my $sock1 = IO::Socket::INET->new(
-	Proto     => 'udp',
-	LocalPort => $port,
-	@bind
- )
- or die "error: could not start server: errno=$@\n";
+my $sock1;
+my $sock2;
+if ($opts{'r'}) {
+	# check for remote reception listen address
+	my @bind;
+	if ($option{'listen'}) {
+		(@bind) = ('LocalAddr', (split(/:/, $option{'listen'}))[0]);
+		for ($option{'listen'}) {
+			/:/ && do {
+				$port = ((split(/:/, $option{'listen'}))[1])
+			};
+		}
+	}
+
+	$sock1 = IO::Socket::INET->new(
+		Proto     => 'udp',
+		LocalPort => $port,
+		@bind
+	  )
+	  or die "error: could not start server: errno=$@\n";
+}
+
 # listen on '/dev/log' socket
 unlink '/dev/log';
-my $sock2 = IO::Socket::UNIX->new(
+$sock2 = IO::Socket::UNIX->new(
 	Local   => "/dev/log",
 	Type    => SOCK_DGRAM,
 	Listen  => 0
@@ -180,7 +180,9 @@ $| = 1;												# autoflush output
 #nonblock($sock2);
 
 my $select = IO::Select->new();
-$select->add($sock1);
+if ($opts{'r'}) {
+	$select->add($sock1);
+}
 $select->add($sock2);
 
 # and add the signal hook:
@@ -305,7 +307,7 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
 				$option{$_} = unquote ( shift @words );
 			} else {
@@ -607,25 +609,22 @@ sub write_message {
 }
 
 
-# a generic help blarb
 sub print_help {
-	print <<"HELP";
-Usage: $0 [opts]
+	# a generic help blarb
+	print <<HELP;
+Usage: $id [opts]
 
-Simple syslogd server for debugging or experimenting with syslog.
+Logging and rotation daemon 
 
-Options for version $VERSION:
-	-h/-?	Display this message
-	-l		 Lists available message keys to template on and exists
+Options for lard:
+    -h/-?    Display this message
 
-	-v		 Verbose: lists errors in parsing log data
+    -r       Enable remote reception of syslog messages
+    -n       Do not daemonize: stay in the foreground
+    -s       Send a running lard daemon a rotate signal. If no
+             running instance is found, rotate files and exit
 
-	-b bb	Bind to host or address instead of to everything
-	-p pp	Use UDP port instead of default ($port)
-
-	-n		 Do not fork into the background
-
-Run perldoc(1) on this script for additional documentation.
+See lard(8) and lard.conf(5) for additional documentation
 
 HELP
 	exit 100;
