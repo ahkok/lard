@@ -188,8 +188,12 @@ $SIG{'HUP'} = \&end;
 my $pid;
 ($opts{'n'}) or ($pid = fork and exit);
 
+my $id = $0;
+$id =~ s/.*\///;
+$id .= "\[$$\]";
+
 # send out a syslog.notice that we have just started
-send_local ('notice', 'started');
+send_local ('notice', "$id: started");
 
 &read_messages;
 
@@ -197,21 +201,21 @@ sub read_messages {
 	# handle messages as usual
 	while (my @ready = $select->can_read) {
 		foreach my $sock (@ready) {
-			handle ($sock);
+			read_message_from_socket ($sock);
 		}
 	}
 }
 
 # add signal handler to trigger rotation
 sub catch_rotate_signal {
-	send_local ("notice", "Received rotation request signal (USR1)");
+	send_local ('notice', "$id: Received rotation request signal (USR1)");
 	rotate_all();
 	&read_messages;
 }
 
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
-	($pid) or send_local ( 'notice', 'shuting down...');
+	($pid) or send_local ( 'notice', "$id: Shuting down");
 	$sock1->close if $sock1;
 	$sock2->close if $sock2;
 }
@@ -223,10 +227,17 @@ END {
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
 	# through our ruleset
-	( my $id = $0 ) =~ s/^.*\/// ;
-	openlog($id, 'pid', 'syslog');
-	syslog(shift, shift);
-	closelog();
+	my $pri = shift;
+	my $pri_code = $syslog_priorities_rv{$pri};
+	write_message({
+		'facility' => 'syslog',
+		'facility_code' => '5',
+		'priority' => $pri,
+		'priority_code' => $pri_code,
+		'MSG' => shift,
+		'TIME' => time,
+		'HOSTNAME' => hostname()
+	  });
 }
 
 
@@ -405,7 +416,7 @@ sub rotate_file {
 	my $keep = shift;
 	my $compress = shift;
 
-	send_local ('debug', "Rotating $file");
+	send_local ('debug', "$id: Rotating $file");
 
 	my $suffix;
 	if ($compress eq "bzip2") {
@@ -437,7 +448,7 @@ sub rotate_file {
 }
 
 # this is the incoming message handler
-sub handle {
+sub read_message_from_socket {
 	my $sock = shift;
 	my ( %message, @errors );
 	
@@ -526,6 +537,13 @@ sub handle {
 	if ( $opts{v} and @errors ) {
 		warn "error: $_\n" for @errors;
 	}
+
+	write_message(\%message);
+}
+
+sub write_message {
+	# write a message hash to the appropriate logfiles
+	my %message = %{ shift() };
 
 	# here we traverse our logging rules and apply the proper procedure
 	# (multiple actions possible)
