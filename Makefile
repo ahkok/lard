@@ -2,6 +2,8 @@
 # lard makefile
 #
 
+VERSION = `perl lard -v`
+
 all:
 
 install: man
@@ -15,3 +17,12 @@ install: man
 man:
 	pod2man lard lard.8
 	pod2man lard.conf.pod lard.conf.5
+
+clean:
+	rm lard.8 lard.conf.5
+
+dist:
+	mkdir lard-$(VERSION)
+	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod lard-$(VERSION)/
+	tar cjf lard-$(VERSION).tar.bz2 lard-$(VERSION)/
+	rm -rf lard-$(VERSION)
