@@ -78,7 +78,7 @@ my %syslog_priorities = (
 	1 => 'alert',
 	2 => 'crit',
 	3 => 'err',
-	4 => 'warning',
+	4 => 'warn',
 	5 => 'notice',
 	6 => 'info',
 	7 => 'debug'
@@ -368,10 +368,18 @@ sub parse_config {
 								if (! $rule{'fac_mask'}) {
 									$rule{'fac_mask'} = $fac_mask_full;
 								}
-								$rule{'fac_mask'} &= ( $fac_mask_full - ( 2<<$syslog_facilities_rv{substr($fac_item, 1)} ) );
+								if (exists $syslog_facilities_rv{substr($fac_item, 1)}) {
+									$rule{'fac_mask'} &= ( $fac_mask_full - ( 2<<$syslog_facilities_rv{substr($fac_item, 1)} ) );
+								} else {
+									die "error: illegal facility name \"$fac_item\"";
+								}
 							} else {
 								# else add it to it
-								$rule{'fac_mask'} |= ( 2<<$syslog_facilities_rv{$fac_item} );
+								if (exists $syslog_facilities_rv{$fac_item}) {
+									$rule{'fac_mask'} |= ( 2<<$syslog_facilities_rv{$fac_item} );
+								} else {
+									die "error: illegal facility name \"$fac_item\"";
+								}
 							}
 						}
 					}
@@ -385,10 +393,18 @@ sub parse_config {
 								if (! $rule{'pri_mask'} ) {
 									$rule{'pri_mask'} = $pri_mask_full;
 								}
-								$rule{'pri_mask'} &= ( $pri_mask_full - ( 2<<$syslog_priorities_rv{substr($pri_item, 1)} ) );
+								if (exists $syslog_priorities_rv{substr($pri_item, 1)}) {
+									$rule{'pri_mask'} &= ( $pri_mask_full - ( 2<<$syslog_priorities_rv{substr($pri_item, 1)} ) );
+								} else {
+									die "error: illegal priority name \"$pri_item\"";
+								}
 							} else {
 								# else add it to it
-								$rule{'pri_mask'} |= ( 2<<$syslog_priorities_rv{$pri_item} );
+								if (exists $syslog_priorities_rv{$pri_item}) {
+									$rule{'pri_mask'} |= ( 2<<$syslog_priorities_rv{$pri_item} );
+								} else {
+									die "error: illegal priority name \"$pri_item\"";
+								}
 							}
 						}
 					}
@@ -699,7 +715,7 @@ sub write_message {
 						chomp $output;
 						if (fork == 0) {
 							# $SIG{CHLD} = 'IGN' || waitpid(-1, WNOHANG)
-							exec("${rule}{'command'} \'$output\'");
+							exec("${$rule}{'command'} \'$output\'");
 						}
 					} elsif (defined ${$rule}{'host'}) {
 						# log to a remote host
