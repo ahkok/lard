@@ -34,6 +34,10 @@ will listen on in remote reception mode (B<-r>).
 Define an alternative UNIX socket to look for incoming local syslog
 messages instead of '/dev/log'/
 
+=item B<domain> {domainname}
+
+Strip (if applicable) the domainname from the hostname.
+
 =back
 
 =head2 Rules
