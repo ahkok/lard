@@ -364,10 +364,10 @@ sub parse_config {
 					} else {
 						for my $fac_item ( split ( /\,/, $fac ) ) {
 							# if negated, deduct the prio from the mask
-							if (! $rule{'fac_mask'}) {
-								$rule{'fac_mask'} = $fac_mask_full;
-							}
 							if ( substr($fac_item, 0, 1) eq '!' ) {
+								if (! $rule{'fac_mask'}) {
+									$rule{'fac_mask'} = $fac_mask_full;
+								}
 								$rule{'fac_mask'} &= ( $fac_mask_full - ( 2<<$syslog_facilities_rv{substr($fac_item, 1)} ) );
 							} else {
 								# else add it to it
@@ -382,7 +382,7 @@ sub parse_config {
 						for my $pri_item ( split ( /,/, $pri ) ) {
 							# if negated, deduct the prio from the mask
 							if ( substr($pri_item, 0, 1) eq '!' ) {
-								if ( ! defined $rule{'pri_mask'} ) {
+								if (! $rule{'pri_mask'} ) {
 									$rule{'pri_mask'} = $pri_mask_full;
 								}
 								$rule{'pri_mask'} &= ( $pri_mask_full - ( 2<<$syslog_priorities_rv{substr($pri_item, 1)} ) );
