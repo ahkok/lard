@@ -183,8 +183,9 @@ sub format_message {
 
 
 sub parse_config {
-	# read and parse rules from the config file
 	my @words;
+
+	# read and parse rules from the config file
 	local *CONF;
 	open(CONF, "/etc/logd.conf");
 	while (<CONF>) {
@@ -199,12 +200,11 @@ sub parse_config {
 	undef %rule;
 	# while ($word = shift @words) {
 	while ( local $_ = shift @words ) {
-	#	for ($word) {
 		/^(?:file|pipe|command|host)$/ && do {
 			if (%rule) {
+				# store last rule if it exists
 				push @rules, {%rule};
 				undef %rule;
-			} else {
 			}
 			# create a new rule
 			$rule{$_} = unquote ( shift @words );
@@ -265,6 +265,38 @@ sub parse_config {
 
 parse_config;
 
+sub rotate_all {
+	# check to see if we can rotate logfiles now
+	my ($keep, $rotate, $compress);
+	for my $rule (@rules) {
+		if ((${$rule}{'file'}) && (${$rule}{'file'} ne "-")) {
+			# it's a logfile rule -> recover the rotation params
+			if (${$rule}{'keep'}) {
+				$keep = ${$rule}{'keep'};
+			} elsif ($option{'keep'}) {
+				$keep = $option{'keep'};
+			} else {
+				$keep = 4;
+			}
+			if (${$rule}{'rotate'}) {
+				$rotate = ${$rule}{'rotate'};
+			} elsif ($option{'rotate'}) {
+				$rotate = $option{'rotate'};
+			} else {
+				$rotate = "weekly";
+			}
+			if (${$rule}{'compress'}) {
+				$compress = ${$rule}{'compress'};
+			} elsif ($option{'compress'}) {
+				$compress = $option{'compress'};
+			} else {
+				$compress = "none";
+			}
+			print "${$rule}{'file'}: $keep, $rotate, $compress\n";
+		}
+	}
+}
+
 sub rotate_file {
 	# takes a filename as argument #1
 	# numer of rotations as #2
@@ -313,7 +345,7 @@ for my $rule (@rules) {
 my (@bind) = ( 'LocalAddr', $opts{'b'} ) if exists $opts{'b'};
 $port = $opts{'p'} if exists $opts{'p'};
 
-$SIG{'INT'} = sub { exit 0 };	# control+c handler
+##$SIG{'INT'} = sub { exit 0 };	# control+c handler
 
 # start up the syslog server
 
@@ -343,7 +375,12 @@ my $select = IO::Select->new();
 $select->add($sock1);
 $select->add($sock2);
 
+# and add the signal hook:
+$SIG{'USR2'} = \&catch_rotate_signal;
+$SIG{'TERM'} = \&end;
+$SIG{'HUP'} = \&end;
 
+# this is the incoming message handler
 sub handle {
 	my $sock = shift;
 	my ( %message, @errors );
@@ -519,6 +556,13 @@ while(@ready = $select->can_read) {
 		handle ($sock);
 	}
 }
+
+# add signal handler to trigger rotation
+sub catch_rotate_signal {
+	send_local ("notice", "Received rotation request signal (USR2)");
+	rotate_all;
+}
+
 
 # a generic help blarb
 sub print_help {
