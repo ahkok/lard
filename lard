@@ -730,105 +730,100 @@ HELP
 
 =head1 NAME
 
-syslog-snarf - Simple syslogd server for debugging syslog
+LARD - Log and Rotate Daemon
 
 =head1 SYNOPSIS
 
-Close any running syslog daemon (the stock syslogd binds to UDP port 514
-even when not being a server), then run the following to act as a
-debugging syslog server:
+Run this daemon like you would any other. The daemon automatically
+forks into the background after parsing the config file:
 
-	# syslog-snarf
+    # lard
 
-Bind to an alternate localhost-only port, be verbose about errors, and
-use custom time and message formats:
+Make sure there isn't a process already occupying the /dev/log
+socket or the UDP port in case you listen to remote messages:
 
-	$ syslog-snarf -b 127.1 -p 9999 -v -t %s -f '%{time_recv} %{raw}\n'
-
-To see a list of available message fields for templating:
-
-	$ syslog-snarf -l
+    # lard -r
 
 =head1 DESCRIPTION
 
-This script is a simple syslog server that binds to a specified UDP
-port (514 by default) and prints out a formatted message of the
-parsed log data:
+lard is a replacement for styslogd and logrotate in one. It makes 
+a lot of sense to combine the ability of these two programs together
+since the daemon can rotate the logfiles independently of write
+access to logfiles because it knows best when it's writing to them.
 
-	2004-06-08T00:16:48-0700 <user.notice> example.org username: test
+lard has also better pattern matching and can match regular expressions
+on the message part of log messages, next to the traditional facility
+and priority matching.
 
-The output format of the log entries and the timestamps involved can be
-altered via templates; timestamps use strftime(3) templates, and log
-entries a custom macro format that uses C<%{keyword}> expansion. The
-currently supported keys to expand on are:
+The output formats of the messages is custom, and a lot of fields
+can be chosen to display the type of message, header details and
+date/time formats. Per logfile/command these options can be adjusted.
 
-	HEADER - syslog message data past the priority field
-	HOSTNAME
-	MSG
-	PRI - syslog protocol facility/priority number
-	TIMESTAMP - timestamp set by log generator
-	facility
-	facility_code
-	length - size of log packet
-	peerhost - where log packet came from
-	peerport
-	priority
-	priority_code
-	raw - unparsed log data
-	time_recv - timestamp when log entry seen by this script
-	
+Rotation can be done based on time or size. Time rotation data
+is kept in a separate file and thus on the first run may not be accurate.
+
+Rotation is not automatically triggered. However, you must signal
+a running lard instance that it is time to rotate the logfiles it
+keeps track of. The signal for this is SIGURS1. You can also
+call lart with the -s option to do this automatically, without
+the need to lookup the PID (which is kept by default in
+/var/run/lard.pid).
+
+The daemon can run in the foreground and dump selected messages
+to stdout if you create a 'log "-"' rule, where "-" is the alias
+used for STDOUT. Any message matching the criteria will be
+printed on stdout.
+
+A message matching special criteria can also be passed directly to
+a shell command. This can be usefull to send alerts directly, without
+waiting for auditing tools to find them later. Beware that using
+input from messages in scripts run as root could be a security
+risk.
+
+Remote reception and delivery is supported with a 'host "hostname"'
+rule. Use the '-r' option to enable the UDP socket for incoming
+syslog messages. Alternatively, you can provide a 'listen' address
+to change the default (which is ALL available addresses) address
+and port.
+
 =head2 Normal Usage
 
-	$ syslog-snarf [options]
+	# lard [options]
 
 See L<"OPTIONS"> for details on the command line switches supported.
-Output is to standard output, errors (under verbose mode) go to
-standard error.
 
 =head1 OPTIONS
 
-This script currently supports the following command line switches:
+lard currently supports the following command line switches:
 
 =over 4
 
 =item B<-h>, B<-?>
 
-Prints a brief usage note about the script.
+Prints a brief usage note.
 
-=item B<-l>
+=item B<-r>
 
-List available fields for templating the message format with the B<-f>
-option.
+Enable remote reception. The daemon will open a UDP socket and listen
+on port 514 by default.
 
-=item B<-b> I<hostname>
+=item B<-f> I<filename>
 
-Bind to specified hostname or address instead of everywhere. For testing
-and to prevent remote connects, 127.1 would be used to bind only to the
-localhost interface:
+Open a different configuration file instead of the default, which is
+/etc/lard.conf.
 
-	-b 127.0.0.1
+=item B<-n>
 
-=item B<-p> I<port>
+Do not daemonize. The daemon doesn't run in the background. Usefull
+with the stdout logging possibility.
 
-Listen on the specified UDP port instead of the default.
+=item B<-s>
 
-=back
-
-=head1 EXAMPLES
-
-=over 4
-
-=item B<Forward logs from syslog-ng>
-
-To have the syslog-ng daemon forward log messages to this script, add
-the following to the syslog-ng.conf configuration file and restart
-syslog-ng. The source statement will need to be altered to suit your
-configuration file:
-
-	destination testdaemon {
-		udp("127.0.0.1" port (9999));
-	};
-	log { source(local); destination(testdaemon); };
+Send a rotate trigger to a running lard daemon. The lard daemon will
+check if any file needs to be rotated according to the criteria in
+the lard.conf file, and rotate the logfiles appropriate. The client
+lard process will exit immediately. Alternatively, you can also
+directly send a SIGUSR1 to the running lard daemon directly.
 
 =back
 
@@ -836,24 +831,19 @@ configuration file:
 
 =head2 Reporting Bugs
 
-Newer versions of this script may be available from:
-
-http://sial.org/code/perl/
-
-If the bug is in the latest version, send a report to the author.
-Patches that fix problems or add new features are welcome.
+See http://lard.foo-projects.org/ for contact information.
 
 =head2 Known Issues
 
-No known bugs.
+None at this moment.
 
 =head1 SEE ALSO
 
-perl(1), [RFC 3164]
+lard(8), lard.conf(5), [RFC 3164]
 
 =head1 AUTHOR
 
-Jeremy Mates, http://sial.org/contact/
+lard was written by Auke Kok, http://lard.foo-projects.org/
 
 =head1 COPYRIGHT
 
@@ -867,8 +857,7 @@ http://www.modperl.com/perl_networking/ (Chapter 18), plus data from
 the Net::Syslog module as well as information in the sys/syslog.h
 header file.
 
-=head1 VERSION
-
-$Id: syslog-snarf,v 2.1 2004/06/08 07:50:44 jmates Exp $
+Parts used from syslog_snarf.pl, written by Jeremy Mates,
+http://sial.org/contact/
 
 =cut
