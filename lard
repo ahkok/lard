@@ -63,12 +63,11 @@ my $HEADER_MSG_re_solaris = qr/^ ((
 /x;
 
 # see strftime man page for allowed fields here
-my $timestamp_template = "%Y-%m-%d %H:%M:%S%z";
+my $timestamp_template = "%b %e %H:%M:%S";
 
 # this is a custom template based on contents of %message hash for each
 # log entry
-my $message_template =
- '%{TIMESTAMP} <%{facility}.%{priority}> %{HOSTNAME} %{MSG}\n';
+my $message_template = '%{TIMESTAMP} %{HOSTNAME} %{MSG}\n';
 
 # syslog.h code->name mappings for better output
 my %syslog_priorities = (
