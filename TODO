@@ -1,7 +1,7 @@
 
 Current bugs:
 
- * none found
+ * local kern.* messages seem to arrive without hostname
 
 Current shortcomings:
 
@@ -9,6 +9,7 @@ Current shortcomings:
  * the parser is too forgiving (error checking)
  * socket nodelay option?
  * test with syslog-ng for rule parsing
+ * -- MARK -- timestamps are missing (requires timer)
 
 Wishlist items:
 
