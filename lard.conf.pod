@@ -34,10 +34,6 @@ will listen on in remote reception mode (B<-r>).
 Define an alternative UNIX socket to look for incoming local syslog
 messages instead of '/dev/log'/
 
-=item B<domain> {domainname}
-
-Strip (if applicable) the domainname from the hostname.
-
 =back
 
 =head2 Rules
@@ -69,6 +65,18 @@ commandline parameter to the command. This may be unsafe!
 
 Define a new rule that sends matching messages to a remote
 logging host.
+
+=back
+
+The options below (with the exception of B<log> and B<match>) can be
+specified both globally and in rules:
+
+=over 4
+
+=item B<domain> {domainname}
+
+Strip (if applicable) the domainname from the hostname.
+
 
 =item B<rotate> {"hourly"|"daily"|"weekly"|"monthly"|[size]}
 
