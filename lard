@@ -25,7 +25,7 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime);
 
-use vars qw(@rules %option %opts $kmsg_child %sockets);
+use vars qw(@rules %option %opts %sockets $mark_timeout);
 
 my $stampfile = "/var/state/lard";
 
@@ -107,6 +107,9 @@ for my $key (keys %syslog_priorities) {
 	$syslog_priorities_rv{$syslog_priorities{$key}} = $key;
 }
 
+# set the mark timeout to a decent default (20 mintes):
+$mark_timeout = 1200;
+
 # format our $id
 my $id = $0;
 $id =~ s/.*\///;
@@ -114,7 +117,7 @@ $id =~ s/.*\///;
 my $VERSION = "0.1.3";
 
 # parse command-line options
-getopts 'h?krnsf:v', \%opts;
+getopts 'fh?Knrs:v', \%opts;
 
 print_help() if exists $opts{'h'} or exists $opts{'?'};
 
@@ -122,19 +125,10 @@ print "$VERSION\n" and exit if exists $opts{'v'};
 
 &parse_config();
 
-
 # start up the syslog server
 my $pidfile = "/var/run/$id.pid";
 local *PID;
-if (! exists $opts{'s'}) {
-	# normal daemon startup
-	if (-e "$pidfile") {
-		die "error: another instance of $id is running";
-	}
-	open (PID, ">$pidfile") or die "error: could not open \"$pidfile\" for writing";
-	print PID $$;
-	close (PID);
-} else {
+if (exists $opts{'s'}) {
 	# send a rotate signal and quit
 	open (PID, "$pidfile") or die "error: could not find pid";
 	my $daemon;
@@ -144,30 +138,17 @@ if (! exists $opts{'s'}) {
 	exit 0;
 }
 
-
 $| = 1;												# autoflush output
 
-my $handle;
 my $select = IO::Select->new();
-if ($opts{'r'}) {
-	$handle = &get_remote_socket;
-	$select->add($handle);
-	$sockets{fileno($handle)} = 'remote';
-}
+&get_inputs;
 
-$handle = &get_local_socket;
-$select->add($handle);
-$sockets{fileno($handle)} = 'local';
-
-if ($opts{'k'}) {
-	$handle = &get_kmsg_socket;
-	$select->add($handle);
-	$sockets{fileno($handle)} = 'local';
-}
+my $pid;
 
 # fork into the background unless we don't want that
-my $pid;
 ($opts{'n'}) or ($pid = fork and exit);
+
+&write_pid;
 
 $id .= "\[$$\]";
 
@@ -178,7 +159,8 @@ send_local ('notice', "$id: started");
 $SIG{'USR1'} = \&catch_rotate_signal;
 $SIG{'TERM'} = \&end;
 $SIG{'INT'} = \&end;
-$SIG{'HUP'} = \&end;
+$SIG{'HUP'} = \&reload;
+$SIG{'ALRM'} = \&mark;
 
 
 while(1) {
@@ -190,6 +172,7 @@ while(1) {
 	}
 }
 
+
 # add signal handler to trigger rotation
 sub catch_rotate_signal {
 	send_local ('notice', "$id: Received rotation request signal (USR1)");
@@ -197,11 +180,38 @@ sub catch_rotate_signal {
 }
 
 
+sub write_pid {
+	# normal daemon startup
+	if (-e "$pidfile") {
+		die "error: another instance of $id is running";
+	}
+	open (PID, ">$pidfile") or die "error: could not open \"$pidfile\" for writing";
+	print PID $$ . "\n";
+	close (PID);
+}
+
+
+sub reload {
+	send_local ('notice', "$id: Received restart request signal (HUP)");
+	&close_handles;
+	undef @rules;
+	&parse_config;
+	&get_inputs;
+}
+
+
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
 	($pid) or send_local ( 'notice', "$id: Shuting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
+	&close_handles;
 	exit 0;
+}
+
+
+sub mark {
+	&write_raw_message('kern', 'info', '-- MARK --' );
+	alarm $mark_timeout;
 }
 
 
@@ -209,6 +219,33 @@ END {
 	if ($pidfile) {
 		unlink ("$pidfile") if not exists $opts{'s'};
 	}
+}
+
+
+sub get_inputs {
+	my $handle;
+	if ($opts{'r'}) {
+		$handle = &get_remote_socket;
+		$select->add($handle);
+		$sockets{fileno($handle)} = 'remote';
+	}
+
+	$handle = &get_local_socket;
+	$select->add($handle);
+	$sockets{fileno($handle)} = 'local';
+
+	if ((-f '/proc/kmsg') && (! $opts{'K'})) {
+		$handle = &get_kmsg_socket;
+		$select->add($handle);
+		$sockets{fileno($handle)} = 'local';
+	}
+}
+
+
+sub close_handles {
+	close $_ foreach $select->handles;
+	$select->remove ( $select->handles );
+	undef %sockets;
 }
 
 
@@ -274,7 +311,12 @@ sub get_kmsg_socket() {
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
 	# through our ruleset
-	my $fac = 'syslog';
+	write_raw_message ('syslog', shift, shift);
+}
+
+
+sub write_raw_message {
+	my $fac = shift;
 	my $pri = shift;
 	my $fac_code = $syslog_facilities_rv{$fac};
 	my $pri_code = $syslog_priorities_rv{$pri};
@@ -363,19 +405,22 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
 				/^(?:match|log)$/ && do {
 					die "error: \"$_\" keyword may only be used in rules";
 				};
 				$option{$_} = unquote ( shift @words );
 			} else {
-				/^(?:socket|listen)$/ && do {
+				/^(?:socket|listen|mark)$/ && do {
 					die "error: \"$_\" keyword may not be used in rules";
 				};
 				# global options
 				$rule{$_} = unquote ( shift @words );
 				# create binary mask for facility.priority
+				/^mark$/ && do {
+					$mark_timeout = unquote ( shift @words );
+				};
 				/^log$/ && do {
 					# set the default mask to full
 					my ( $fac, $pri ) = split ( /\./, $rule{$_} );
@@ -662,6 +707,8 @@ sub read_message_from_socket {
 
 
 sub write_message {
+	# delay -- MARK -- messages
+	alarm $mark_timeout;
 	# write a message hash to the appropriate logfiles
 	my %message = %{ shift() };
 
@@ -745,7 +792,8 @@ Options for lard:
     -h/-?    Display this message
 
     -r       Enable remote reception of syslog messages
-    -k       Receive kernel messages from /proc/kmsg under linux
+    -K       Do not receive kernel messages from /proc/kmsg unders
+             linux (on by default if /proc/kmsg exists)
     -n       Do not daemonize: stay in the foreground
     -s       Send a running lard daemon a rotate signal. If no
              running instance is found, rotate files and exit
@@ -836,10 +884,13 @@ Prints a brief usage note.
 Enable remote reception. The daemon will open a UDP socket and listen
 on port 514 by default.
 
-=item B<-k>
+=item B<-K>
 
-Trap kernel messages for linux by reading /proc/kmsg. This replaces
-the functionality of klogd for that platform.
+The linux kernel logs kernel messages to the file /proc/kmsg. Lard
+by default will monitor the file for incoming messages and process
+these just like normal syslog messages. You can disable this feature
+with this option, in case you do not want kernel messages to be logged
+or if you are running some other logging tool for kernel messages.
 
 =item B<-f> I<filename>
 
@@ -858,6 +909,32 @@ check if any file needs to be rotated according to the criteria in
 the lard.conf file, and rotate the logfiles appropriate. The client
 lard process will exit immediately. Alternatively, you can also
 directly send a SIGUSR1 to the running lard daemon directly.
+
+=back
+
+=head1 SIGNALS
+
+Lard can receive a few signals that influence it's behavour next to the
+obvious B<TERM> and B<INT> signal:
+
+=over 8
+
+=item B<SIGHUP>
+
+Sending lard a B<SIGHUP> signal will cause lard to close all listening
+sockets, re-read the configuration file and re-initiate the sockets.
+This allows you to change configuration parameters on the fly without
+restarting lard.
+
+=item B<SIGUSR1>
+
+Sending lard a B<SIGUSR1> causes lard to check all logfiles to see
+if they need to be rotated. Lard will temporarily suspend the logging
+of incoming messages and thus can safely move/rename the logfiles and
+optionall compress them. You can send this rotate signal also by issueing
+a `lard -s`, which will do this for you. This command can be run
+from a crontab for instance, especialy when you want to do some processing
+of your logfiles before archiving them.
 
 =back
 
