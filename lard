@@ -135,14 +135,33 @@ print_help() if exists $opts{'h'} or exists $opts{'?'};
 
 &parse_config();
 
-for my $rule (@rules) {
-	for my $key (keys %{$rule}) {
-		print "$key => ${$rule}{$key}\n";
-	}
-	print "\n";
-}
+#for my $rule (@rules) {
+#	for my $key (keys %{$rule}) {
+#		print "$key => ${$rule}{$key}\n";
+#	}
+#	print "\n";
+#}
 
 # start up the syslog server
+my $pidfile = "/var/run/$id.pid";
+local *PID;
+if (! exists $opts{'s'}) {
+	if (-e "$pidfile") {
+		die "error: another instance of $id is running";
+	}
+	open (PID, ">$pidfile");
+	print PID $$;
+	close (PID);
+} else {
+	# send a rotate signal and quit
+	open (PID, "$pidfile") or die "error: could not find pid";
+	my $daemon;
+	$daemon = (<PID>);
+	close (PID);
+	kill ( 10, $daemon) or die "error: could not send signal USR1 to process $daemon";
+	exit 0;
+}
+
 
 # listen on the UDP socket
 my $sock1;
@@ -167,15 +186,23 @@ if ($opts{'r'}) {
 	  or die "error: could not start server: errno=$@\n";
 }
 
-# listen on '/dev/log' socket
-unlink '/dev/log';
+# listen on socket
+my $socketfile;
+if ($option{'socket'}) {
+	$socketfile = $option{'socket'};
+} else {
+	$socketfile = '/dev/log';
+}
+if (-e $socketfile) {
+	unlink $socketfile or die "error: cannot get socket \"$socketfile\"";
+}
 $sock2 = IO::Socket::UNIX->new(
-	Local   => "/dev/log",
+	Local   => "$socketfile",
 	Type    => SOCK_DGRAM,
 	Listen  => 0
  )
  or die "error: could not start server: errno=$@\n";
-chmod 0666, '/dev/log';
+chmod 0666, "$socketfile";
 
 $| = 1;												# autoflush output
 
@@ -191,6 +218,7 @@ $select->add($sock2);
 # and add the signal hook:
 $SIG{'USR1'} = \&catch_rotate_signal;
 $SIG{'TERM'} = \&end;
+$SIG{'INT'} = \&end;
 $SIG{'HUP'} = \&end;
 
 # fork into the background unless we don't want that
@@ -220,12 +248,16 @@ sub catch_rotate_signal {
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
 	($pid) or send_local ( 'notice', "$id: Shuting down");
+	unlink ("$pidfile") if not exists $opts{'s'};
 	$sock1->close if $sock1;
 	$sock2->close if $sock2;
+	exit 0;
 }
 
 END {
-	end;
+	unlink ("$pidfile") if not exists $opts{'s'};
+	$sock1->close if $sock1;
+	$sock2->close if $sock2;
 }
 
 sub send_local {
@@ -310,7 +342,7 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
 				$option{$_} = unquote ( shift @words );
 			} else {
