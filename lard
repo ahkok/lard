@@ -15,8 +15,6 @@
 
 use strict;
 
-use threads;
-
 use Socket;
 use IO::Socket;
 use IO::Select;
