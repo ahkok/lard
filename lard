@@ -34,6 +34,7 @@ my $bind;
 # what port to bind to by default
 my $port = 514;
 
+my $stampfile = "/var/state/lard";
 # max message length for incoming data ([RFC 3164] limits this to 1024
 # by default, though things might not follow the standards)
 my $max_msg_len	= 5000;
@@ -146,6 +147,7 @@ print_help() if exists $opts{'h'} or exists $opts{'?'};
 my $pidfile = "/var/run/$id.pid";
 local *PID;
 if (! exists $opts{'s'}) {
+	# normal daemon startup
 	if (-e "$pidfile") {
 		die "error: another instance of $id is running";
 	}
@@ -358,6 +360,9 @@ sub parse_config {
 					} else {
 						for my $fac_item ( split ( /\,/, $fac ) ) {
 							# if negated, deduct the prio from the mask
+							if (! $rule{'fac_mask'}) {
+								$rule{'fac_mask'} = $fac_mask_full;
+							}
 							if ( substr($fac_item, 0, 1) eq '!' ) {
 								$rule{'fac_mask'} &= ( $fac_mask_full - ( 2<<$syslog_facilities_rv{substr($fac_item, 1)} ) );
 							} else {
@@ -395,6 +400,55 @@ sub parse_config {
 	}
 }
 
+
+sub get_timestamp {
+	my $file = shift;
+	local *STAMP;
+	if (open (STAMP, $stampfile)) {
+		while (<STAMP>) {
+			/^$file .*$/ && do {
+				$_ =~ s/$file //;
+				chomp;
+				close (STAMP);
+				return $_;
+			};
+		}	
+		close (STAMP);
+		# fallback: record the time for a file missing a timestamp:
+		write_timestamp($file);
+		return time;
+	} else {
+		write_timestamp($file);
+		return time;
+	}
+}
+
+
+sub write_timestamp {
+	my $file = shift;
+	my @lines;
+	local *STAMP;
+	if (open (STAMP, "$stampfile")) {
+		while (<STAMP>) {
+			/^$file .*$/ || do {
+				push @lines, $_;
+			};
+		}
+		close (STAMP);
+		open (STAMP, ">$stampfile");
+		for my $line (@lines) {
+			print STAMP "$line";
+		}
+		print STAMP "$file" . " " . time . "\n";
+		close (STAMP);
+	} else {
+		open (STAMP, ">$stampfile") or die "error: cannot create timestamp file \"$stampfile\"";
+		print STAMP "$file" . " " . time . "\n";
+		close (STAMP);
+	}
+}
+
+
 sub rotate_all {
 	# check to see if we can rotate logfiles now
 	my ($keep, $rotate, $compress);
@@ -423,16 +477,18 @@ sub rotate_all {
 				$compress = "none";
 			}
 
-			my $ctime = ((stat(${$rule}{'file'}))[10]);
+			my $ctime = get_timestamp(${$rule}{'file'});
 			for ($rotate) {
 				/^(?:hourly|daily|weekly|monthly)$/ && do {
 					if (
-							(($rotate eq "hourly") && ($ctime <= (time - 3600))) ||
-							(($rotate eq "daily") && ($ctime <= (time - 80640))) ||
-							(($rotate eq "weekly") && ($ctime <= (time - 564480))) ||
-							(($rotate eq "monthly") && ($ctime <= (time - 2452262))) ) {
+							(($rotate eq "hourly") && ($ctime < (time - 3600))) ||
+							(($rotate eq "daily") && ($ctime < (time - 80640))) ||
+							(($rotate eq "weekly") && ($ctime < (time - 564480))) ||
+							(($rotate eq "monthly") && ($ctime < (time - 2452262))) ) {
 						rotate_file (${$rule}{'file'}, $keep, $compress);
+						write_timestamp(${$rule}{'file'});
 					}
+					next;
 				};
 				/^(?:\d+[KMG]|\d+)$/ && do {
 					$rotate =~ s/K$/000/;
@@ -441,6 +497,7 @@ sub rotate_all {
 					if (((stat(${$rule}{'file'}))[7]) >= $rotate) {
 						rotate_file (${$rule}{'file'}, $keep, $compress);
 					}
+					next;
 				};
 			}
 		}
