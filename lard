@@ -276,7 +276,7 @@ sub catch_rotate_signal {
 
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
-	($pid) or ($kmsg_child == 0) or send_local ( 'notice', "$id: Shuting down");
+	($pid) or send_local ( 'notice', "$id: Shuting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
 	$sock1->close if $sock1;
 	$sock2->close if $sock2;
