@@ -7,7 +7,7 @@ VERSION = `perl lard -v`
 all:
 
 install: man
-	install -m755 lard /usr/sbin
+	install -m755 lard /usr/sbin/
 	if [ ! -e /etc/lard.conf ]; then \
 		install -m644 lard.conf /etc/ ; \
 	fi
@@ -23,6 +23,6 @@ clean:
 
 dist: man
 	mkdir lard-$(VERSION)
-	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod TODO lard-$(VERSION)/
+	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod TODO ChangeLog lard-$(VERSION)/
 	tar cjf lard-$(VERSION).tar.bz2 lard-$(VERSION)/
 	rm -rf lard-$(VERSION)
