@@ -122,12 +122,6 @@ print "$VERSION\n" and exit if exists $opts{'v'};
 
 &parse_config();
 
-#for my $rule (@rules) {
-#	for my $key (keys %{$rule}) {
-#		print "$key => ${$rule}{$key}\n";
-#	}
-#	print "\n";
-#}
 
 # start up the syslog server
 my $pidfile = "/var/run/$id.pid";
@@ -149,7 +143,6 @@ if (! exists $opts{'s'}) {
 	kill (10, $daemon) or die "error: could not send signal USR1 to process $daemon";
 	exit 0;
 }
-
 
 
 $| = 1;												# autoflush output
@@ -217,6 +210,7 @@ END {
 		unlink ("$pidfile") if not exists $opts{'s'};
 	}
 }
+
 
 sub get_remote_socket {
 	# check for remote reception listen address
@@ -551,6 +545,7 @@ sub rotate_all {
 	}
 }
 
+
 sub rotate_file {
 	# takes a filename as argument #1
 	# numer of rotations as #2
@@ -590,29 +585,29 @@ sub rotate_file {
 	}
 }
 
+
 # this is the incoming message handler
 sub read_message_from_socket {
 	my $sock = shift;
 	my %message = ();
 
-	# max message length for incoming data ([RFC 3164] limits this to 1024
-	# by default, though things might not follow the standards)
 	my $max_msg_len	= 5000;
-	sysread($sock, $message{'raw'}, $max_msg_len) or die "error: cannot read from socket";
+	if ($sockets{fileno($sock)} eq 'remote' ) {
+		# use the recv() method for INET sockets:
+		$sock->recv($message{'raw'}, $max_msg_len);
+		$message{'peerhost'} = gethostbyaddr($sock->peeraddr, AF_INET)
+		  || $sock->peerhost;
+		$message{'peerport'} = $sock->peerport;
+	} else {
+		# max message length for incoming data ([RFC 3164] limits this to 1024
+		# by default, though things might not follow the standards)
+		sysread($sock, $message{'raw'}, $max_msg_len) or die "error: cannot read from socket";
+		$message{'peerhost'} = hostname();
+	}
 
 	# tag with the current time:
 	$message{'time_recv'} = time;
 	
-	# distonguish based on the protocol
-	if (($sockets{fileno($sock)} eq 'remote' ) && ($sock->sockdomain == &AF_INET )) {
-		# get various info on the packet in question
-		$message{'peerhost'} = $sock->peerhost;
-		$message{'peerport'} = $sock->peerport;
-	} else {
-		# log with local name
-		$message{'peerhost'} = hostname();
-	}
-
 	# see [RFC 3164] for syslog message format details
 	$message{'length'} = length( $message{'raw'} );
 
@@ -664,6 +659,7 @@ sub read_message_from_socket {
 
 	write_message(\%message);
 }
+
 
 sub write_message {
 	# write a message hash to the appropriate logfiles
