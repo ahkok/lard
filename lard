@@ -15,11 +15,11 @@
 
 use strict;
 
+use threads;
+
 use Socket;
 use IO::Socket;
 use IO::Select;
-
-use Sys::Syslog;
 
 use Sys::Hostname;
 
@@ -27,7 +27,7 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime);
 
-use vars qw(@rules %option %opts $kmsg_child);
+use vars qw(@rules %option %opts $kmsg_child %sockets);
 
 my $stampfile = "/var/state/lard";
 
@@ -113,7 +113,7 @@ for my $key (keys %syslog_priorities) {
 my $id = $0;
 $id =~ s/.*\///;
 
-my $VERSION = "0.1.2";
+my $VERSION = "0.1.3";
 
 # parse command-line options
 getopts 'h?krnsf:v', \%opts;
@@ -153,60 +153,26 @@ if (! exists $opts{'s'}) {
 }
 
 
-# listen on the UDP socket
-my $sock1;
-my $sock2;
-if ($opts{'r'}) {
-	# check for remote reception listen address
-	my @bind;
-	my $port = 514;
-	if ($option{'listen'}) {
-		(@bind) = ('LocalAddr', (split(/:/, $option{'listen'}))[0]);
-		for ($option{'listen'}) {
-			/:/ && do {
-				$port = ((split(/:/, $option{'listen'}))[1])
-			};
-		}
-	}
-
-	$sock1 = IO::Socket::INET->new(
-		Proto     => 'udp',
-		LocalPort => $port,
-		@bind
-	  )
-	  or die "error: could not start server: errno=$@\n";
-}
-
-# listen on socket
-my $socketfile;
-if ($option{'socket'}) {
-	$socketfile = $option{'socket'};
-} else {
-	$socketfile = '/dev/log';
-}
-if (-e $socketfile) {
-	unlink $socketfile or die "error: cannot get socket \"$socketfile\"";
-}
-$sock2 = IO::Socket::UNIX->new(
-	Local   => "$socketfile",
-	Type    => SOCK_DGRAM,
-	Listen  => 0
- )
- or die "error: could not start server: errno=$@\n";
-chmod 0666, "$socketfile";
-
-
 
 $| = 1;												# autoflush output
 
-#nonblock($sock1);
-#nonblock($sock2);
-
+my $handle;
 my $select = IO::Select->new();
 if ($opts{'r'}) {
-	$select->add($sock1);
+	$handle = &get_remote_socket;
+	$select->add($handle);
+	$sockets{fileno($handle)} = 'remote';
 }
-$select->add($sock2);
+
+$handle = &get_local_socket;
+$select->add($handle);
+$sockets{fileno($handle)} = 'local';
+
+if ($opts{'k'}) {
+	$handle = &get_kmsg_socket;
+	$select->add($handle);
+	$sockets{fileno($handle)} = 'local';
+}
 
 # fork into the background unless we don't want that
 my $pid;
@@ -216,41 +182,6 @@ $id .= "\[$$\]";
 
 # send out a syslog.notice that we have just started
 send_local ('notice', "$id: started");
-
-# listen to /proc/kmsg
-if ($opts{'k'}) {
-	if (! -f "/proc/kmsg") {
-		die "error: cannot open \"/proc/kmsg\"";
-	}
-	# we fork into the background and send our messages to the socket
-	# at /dev/log. This makes tailing the logfile a lot easier for now
-	# and retains the fact that only one thread writes to files
-	$kmsg_child = fork;
-	if ($kmsg_child == 0) {
-		my $client = IO::Socket::UNIX->new(
-			Peer    => "$socketfile",
-		    Type    => SOCK_DGRAM,
-			Timeout => 3
-		  );
-		local *KMSG;
-		open (KMSG, "/proc/kmsg") or die "error: cannot open \"/proc/kmsg\"";
-		# loop forever reading lines
-		while (<KMSG>) {
-			my %message;
-			chomp;
-			$message{'raw'} = $_;
-		    if ( $message{'raw'} =~ m/$PRI_data_re/o ) {
-				( $message{'PRI'}, my $msg ) = ( $1, $2 );
-				# hackwork: prepend the '0' facilty for kernel and dump
-				my $buf = "<0" . $message{'PRI'} . ">kernel: " . $msg;
-				$client->send($buf);
-			}
-		}
-		close (KMSG);
-	} else {
-		send_local('debug', "$id: spawned kernel msg logger with pid [$kmsg_child]");
-	}
-}
 
 # and add the signal hook:
 $SIG{'USR1'} = \&catch_rotate_signal;
@@ -274,22 +205,79 @@ sub catch_rotate_signal {
 	rotate_all();
 }
 
+
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
 	($pid) or send_local ( 'notice', "$id: Shuting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
-	$sock1->close if $sock1;
-	$sock2->close if $sock2;
 	exit 0;
 }
+
 
 END {
 	if ($pidfile) {
 		unlink ("$pidfile") if not exists $opts{'s'};
 	}
-	$sock1->close if $sock1;
-	$sock2->close if $sock2;
 }
+
+sub get_remote_socket {
+	# check for remote reception listen address
+	my $sock;
+	my @bind;
+	my $port = 514;
+	if ($option{'listen'}) {
+		(@bind) = ('LocalAddr', (split(/:/, $option{'listen'}))[0]);
+		for ($option{'listen'}) {
+			/:/ && do {
+				$port = ((split(/:/, $option{'listen'}))[1])
+			};
+		}
+	}
+
+	$sock = IO::Socket::INET->new(
+		Proto     => 'udp',
+		LocalPort => $port,
+		@bind
+	  )
+	  or die "error: could not start server: errno=$@\n";
+	return $sock;
+}
+
+
+sub get_local_socket() {
+	# listen on socket
+	my $sock;
+	my $socketfile;
+	if ($option{'socket'}) {
+		$socketfile = $option{'socket'};
+	} else {
+		$socketfile = '/dev/log';
+	}
+	if (-e $socketfile) {
+		unlink $socketfile or die "error: cannot get socket \"$socketfile\"";
+	}
+	$sock = IO::Socket::UNIX->new(
+		Local   => "$socketfile",
+		Type    => SOCK_DGRAM,
+		Listen  => 0
+	 )
+	 or die "error: could not start server: errno=$@\n";
+	chmod 0666, "$socketfile";
+	return $sock
+}
+
+
+sub get_kmsg_socket() {
+	# listen on /proc/kmsg
+	my $handle;
+	my $socketfile = '/proc/kmsg';
+	if (! -e $socketfile) {
+		die "error: cannot get socket \"$socketfile\"";
+	}
+	open ($handle, $socketfile ) or die "error: cannot open \"/proc/kmsg\"";
+	return $handle;
+}
+
 
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
@@ -612,15 +600,15 @@ sub read_message_from_socket {
 	# max message length for incoming data ([RFC 3164] limits this to 1024
 	# by default, though things might not follow the standards)
 	my $max_msg_len	= 5000;
-	$sock->recv( $message{'raw'}, $max_msg_len );
+	sysread($sock, $message{'raw'}, $max_msg_len) or die "error: cannot read from socket";
 
+	# tag with the current time:
 	$message{'time_recv'} = time;
 	
 	# distonguish based on the protocol
-	if ( $sock->sockdomain == AF_INET ) {
+	if (($sockets{fileno($sock)} eq 'remote' ) && ($sock->sockdomain == &AF_INET )) {
 		# get various info on the packet in question
-		$message{'peerhost'} = gethostbyaddr( $sock->peeraddr, AF_INET )
-		 || $sock->peerhost;
+		$message{'peerhost'} = $sock->peerhost;
 		$message{'peerport'} = $sock->peerport;
 	} else {
 		# log with local name
