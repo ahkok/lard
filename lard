@@ -161,6 +161,8 @@ $SIG{'TERM'} = \&end;
 $SIG{'INT'} = \&end;
 $SIG{'HUP'} = \&reload;
 $SIG{'ALRM'} = \&mark;
+# ignore CHLD exiting to kill off zombies
+$SIG{'CHLD'} = 'IGNORE';
 
 
 while(1) {
