@@ -27,7 +27,13 @@ use POSIX qw(strftime);
 
 use vars qw(@rules %option %opts %sockets $mark_timeout);
 
+# define some globals
+my $VERSION = "0.1.4";
 my $stampfile = "/var/state/lard";
+my $id = $0;
+$id =~ s/.*\///;
+my $pidfile = "/var/run/$id.pid";
+my $pid;
 
 # to match PRI header plus remaining fields
 my $PRI_data_re = qr/^ < (\d{1,3}) > (.*) /x;
@@ -110,12 +116,6 @@ for my $key (keys %syslog_priorities) {
 # set the mark timeout to a decent default (20 mintes):
 $mark_timeout = 1200;
 
-# format our $id
-my $id = $0;
-$id =~ s/.*\///;
-
-my $VERSION = "0.1.3";
-
 # parse command-line options
 getopts 'fh?Knrs:v', \%opts;
 
@@ -126,7 +126,6 @@ print "$VERSION\n" and exit if exists $opts{'v'};
 &parse_config();
 
 # start up the syslog server
-my $pidfile = "/var/run/$id.pid";
 local *PID;
 if (exists $opts{'s'}) {
 	# send a rotate signal and quit
@@ -143,13 +142,19 @@ $| = 1;												# autoflush output
 my $select = IO::Select->new();
 &get_inputs;
 
-my $pid;
-
 # fork into the background unless we don't want that
-($opts{'n'}) or ($pid = fork and exit);
+if ($opts{'n'}) {
+  &write_pid($$);
+} else {
+  if ($pid = fork) {
+	# write the proper PID:
+    &write_pid($pid);
+	# and exit after!
+    exit;
+  }
+}
 
-&write_pid;
-
+# now we know for sure:
 $id .= "\[$$\]";
 
 # send out a syslog.notice that we have just started
@@ -183,12 +188,13 @@ sub catch_rotate_signal {
 
 
 sub write_pid {
+	my $p = shift;
 	# normal daemon startup
 	if (-e "$pidfile") {
 		die "error: another instance of $id is running";
 	}
 	open (PID, ">$pidfile") or die "error: could not open \"$pidfile\" for writing";
-	print PID $$ . "\n";
+	print PID $p . "\n";
 	close (PID);
 }
 
@@ -218,7 +224,7 @@ sub mark {
 
 
 END {
-	if ($pidfile) {
+	if ((-e $pidfile) && (! $pid)) {
 		unlink ("$pidfile") if not exists $opts{'s'};
 	}
 }
