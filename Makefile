@@ -23,6 +23,6 @@ clean:
 
 dist: man
 	mkdir lard-$(VERSION)
-	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod lard-$(VERSION)/
+	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod TODO lard-$(VERSION)/
 	tar cjf lard-$(VERSION).tar.bz2 lard-$(VERSION)/
 	rm -rf lard-$(VERSION)
