@@ -1,8 +1,6 @@
 
 Current bugs:
 
- * local kern.* messages seem to arrive without hostname
-
 Current shortcomings:
 
  * pipe functionality is not implemented
@@ -15,4 +13,5 @@ Wishlist items:
 
  * postrotate hooks to signal apache/squid etc
  * set owner/perms of logfiles
+ * remove syslog_ng crap and unify pattern matching
 
