@@ -20,7 +20,6 @@ use IO::Socket;
 use IO::Select;
 
 use Sys::Syslog;
-use Net::Syslog;
 
 use Sys::Hostname;
 
@@ -40,8 +39,7 @@ my $stampfile = "/var/state/lard";
 my $max_msg_len	= 5000;
 my $msg_len_warn = 1024;
 
-use vars qw(@rules %option %opts $PRI_data_re $HEADER_MSG_re_syslog_ng);
-
+use vars qw(@rules %option %opts $PRI_data_re $HEADER_MSG_re_syslog_ng $kmsg_child);
 
 # to match PRI header plus remaining fields
 my $PRI_data_re = qr/^ < (\d{1,3}) > (.*) /x;
@@ -130,7 +128,7 @@ $id =~ s/.*\///;
 my $VERSION = "0.1.2";
 
 # parse command-line options
-getopts 'h?rnsf:v', \%opts;
+getopts 'h?krnsf:', \%opts;
 
 print_help() if exists $opts{'h'} or exists $opts{'?'};
 
@@ -153,7 +151,7 @@ if (! exists $opts{'s'}) {
 	if (-e "$pidfile") {
 		die "error: another instance of $id is running";
 	}
-	open (PID, ">$pidfile");
+	open (PID, ">$pidfile") or die "error: could not open \"$pidfile\" for writing";
 	print PID $$;
 	close (PID);
 } else {
@@ -162,7 +160,7 @@ if (! exists $opts{'s'}) {
 	my $daemon;
 	$daemon = (<PID>);
 	close (PID);
-	kill ( 10, $daemon) or die "error: could not send signal USR1 to process $daemon";
+	kill (10, $daemon) or die "error: could not send signal USR1 to process $daemon";
 	exit 0;
 }
 
@@ -208,6 +206,8 @@ $sock2 = IO::Socket::UNIX->new(
  or die "error: could not start server: errno=$@\n";
 chmod 0666, "$socketfile";
 
+
+
 $| = 1;												# autoflush output
 
 #nonblock($sock1);
@@ -219,12 +219,6 @@ if ($opts{'r'}) {
 }
 $select->add($sock2);
 
-# and add the signal hook:
-$SIG{'USR1'} = \&catch_rotate_signal;
-$SIG{'TERM'} = \&end;
-$SIG{'INT'} = \&end;
-$SIG{'HUP'} = \&end;
-
 # fork into the background unless we don't want that
 my $pid;
 ($opts{'n'}) or ($pid = fork and exit);
@@ -233,6 +227,48 @@ $id .= "\[$$\]";
 
 # send out a syslog.notice that we have just started
 send_local ('notice', "$id: started");
+
+# listen to /proc/kmsg
+if ($opts{'k'}) {
+	if (! -f "/proc/kmsg") {
+		die "error: cannot open \"/proc/kmsg\"";
+	}
+	# we fork into the background and send our messages to the socket
+	# at /dev/log. This makes tailing the logfile a lot easier for now
+	# and retains the fact that only one thread writes to files
+	$kmsg_child = fork;
+	if ($kmsg_child == 0) {
+		my $client = IO::Socket::UNIX->new(
+			Peer    => "$socketfile",
+		    Type    => SOCK_DGRAM,
+			Timeout => 3
+		  );
+		local *KMSG;
+		open (KMSG, "/proc/kmsg") or die "error: cannot open \"/proc/kmsg\"";
+		# loop forever reading lines
+		while (<KMSG>) {
+			my %message;
+			chomp;
+			$message{'raw'} = $_;
+		    if ( $message{'raw'} =~ m/$PRI_data_re/o ) {
+				( $message{'PRI'}, my $msg ) = ( $1, $2 );
+				# hackwork: prepend the '0' facilty for kernel and dump
+				my $buf = "<0" . $message{'PRI'} . ">kernel: " . $msg;
+				$client->send($buf);
+			}
+		}
+		close (KMSG);
+	} else {
+		send_local('debug', "$id: spawned kernel msg logger with pid [$kmsg_child]");
+	}
+}
+
+# and add the signal hook:
+$SIG{'USR1'} = \&catch_rotate_signal;
+$SIG{'TERM'} = \&end;
+$SIG{'INT'} = \&end;
+$SIG{'HUP'} = \&end;
+
 
 while(1) {
 	# handle messages as usual
@@ -251,7 +287,7 @@ sub catch_rotate_signal {
 
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
-	($pid) or send_local ( 'notice', "$id: Shuting down");
+	($pid) or ($kmsg_child == 0) or send_local ( 'notice', "$id: Shuting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
 	$sock1->close if $sock1;
 	$sock2->close if $sock2;
@@ -269,11 +305,15 @@ END {
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
 	# through our ruleset
+	my $fac = 'syslog';
 	my $pri = shift;
+	my $fac_code = $syslog_facilities_rv{$fac};
 	my $pri_code = $syslog_priorities_rv{$pri};
+	my $pri_tuple = $fac_code * 8 + $pri_code;
 	write_message({
-		'facility' => 'syslog',
-		'facility_code' => '5',
+	    'PRI' => "$pri_tuple",
+		'facility' => $fac,
+		'facility_code' => $fac_code,
 		'priority' => $pri,
 		'priority_code' => $pri_code,
 		'MSG' => shift,
@@ -286,14 +326,17 @@ sub send_local {
 sub send_remote {
 	# send a message to a specific loghost
 	my $host = shift;
+	my $port = 514;
 	my %message = %{ shift() };
-
-	my $syslog = new Net::Syslog (
-			SyslogHost => $host,
-			Facility => $message{'facility'},
-			Priority => $message{'priority'}
-		);
-	$syslog->send("$message{'MSG'}\n");
+	$host = (split(/:/, $host))[0];
+	for ($host) {
+		/:/ && do {
+			$port = (split(/:/, $host))[1];
+		};
+	}
+	local *SOCKET;
+	socket(SOCKET, PF_INET, SOCK_DGRAM, getprotobyname("udp")) or die "socket: $!";
+	send(SOCKET, "<" . $message{'PRI'} . ">" . $message{'MSG'} . "\n", 0, sockaddr_in($port, inet_aton($host)));
 }
 
 
@@ -339,6 +382,9 @@ sub parse_config {
 	# while ($word = shift @words) {
 	while ( local $_ = shift @words ) {
 		/^(?:file|pipe|command|host)$/ && do {
+			/^pipe$/ && do {
+				die "error: \"pipe\" rule not implemented yet";
+			};
 			if (%rule) {
 				# store last rule if it exists
 				push @rules, {%rule};
@@ -350,8 +396,14 @@ sub parse_config {
 		};
 		/^(?:socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
+				/^(?:match|log)$/ && do {
+					die "error: \"$_\" keyword may only be used in rules";
+				};
 				$option{$_} = unquote ( shift @words );
 			} else {
+				/^(?:socket|listen)$/ && do {
+					die "error: \"$_\" keyword may not be used in rules";
+				};
 				# global options
 				$rule{$_} = unquote ( shift @words );
 				# create binary mask for facility.priority
@@ -566,10 +618,7 @@ sub rotate_file {
 # this is the incoming message handler
 sub read_message_from_socket {
 	my $sock = shift;
-	my ( %message, @errors );
-	
-	%message = ();
-	@errors	= ();
+	my %message = ();
 
 	$sock->recv( $message{'raw'}, $max_msg_len );
 
@@ -588,11 +637,8 @@ sub read_message_from_socket {
 
 	# see [RFC 3164] for syslog message format details
 	$message{'length'} = length( $message{'raw'} );
-	push @errors, "message exceeds length of $msg_len_warn"
-	 if $message{'length'} > $msg_len_warn;
 
 	if ( $message{'length'} == 0 ) {
-		push @errors, 'message contains no data';
 		next;
 	}
 
@@ -600,29 +646,18 @@ sub read_message_from_socket {
 
 	if ( $message{'raw'} =~ m/$PRI_data_re/o ) {
 		( $message{'PRI'}, $header_msg ) = ( $1, $2 );
-
 		# decode facility/priority (see [RFC 2234] for PRI part values
 		if ( $message{'PRI'} ) {
 			$message{'priority_code'} = $message{'PRI'} % 8;
 			if ( exists $syslog_priorities{ $message{'priority_code'} } ) {
 				$message{'priority'} = $message{'priority_code'};
 				$message{'priority'} = $syslog_priorities{ $message{'priority_code'} };
-			} else {
-				push @errors, "no name for priority $message{'priority_code'}";
 			}
-
 			$message{'facility_code'} = int( $message{'PRI'} / 8 );
 			if ( exists $syslog_facilities{ $message{'facility_code'} } ) {
 				$message{'facility'} = $syslog_facilities{ $message{'facility_code'} };
-			} else {
-				$message{'facility'} = $message{'facility_code'};
-				push @errors, "no name for facility $message{'facility_code'}";
 			}
 		}
-
-	} else {
-		push @errors, 'could not parse PRI field';
-		next;
 	}
 
 	# TODO is syslog-ng adding \n to the data already?
@@ -647,10 +682,6 @@ sub read_message_from_socket {
 		 $message{'HOSTNAME'}, $message{'MSG'}
 		)
 		 = ( '', time , $message{'peerhost'}, $header_msg );
-	}
-
-	if ( $opts{'v'} and @errors ) {
-		warn "error: $_\n" for @errors;
 	}
 
 	write_message(\%message);
@@ -740,6 +771,7 @@ Options for lard:
     -h/-?    Display this message
 
     -r       Enable remote reception of syslog messages
+    -k       Receive kernel messages from /proc/kmsg under linux
     -n       Do not daemonize: stay in the foreground
     -s       Send a running lard daemon a rotate signal. If no
              running instance is found, rotate files and exit
@@ -829,6 +861,11 @@ Prints a brief usage note.
 
 Enable remote reception. The daemon will open a UDP socket and listen
 on port 514 by default.
+
+=item B<-k>
+
+Trap kernel messages for linux by reading /proc/kmsg. This replaces
+the functionality of klogd for that platform.
 
 =item B<-f> I<filename>
 
