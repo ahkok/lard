@@ -180,7 +180,7 @@ $select->add($sock1);
 $select->add($sock2);
 
 # and add the signal hook:
-$SIG{'USR2'} = \&catch_rotate_signal;
+$SIG{'USR1'} = \&catch_rotate_signal;
 $SIG{'TERM'} = \&end;
 $SIG{'HUP'} = \&end;
 
@@ -204,12 +204,9 @@ sub read_messages {
 
 # add signal handler to trigger rotation
 sub catch_rotate_signal {
-	send_local ("notice", "Received rotation request signal (USR2)");
+	send_local ("notice", "Received rotation request signal (USR1)");
 	rotate_all();
-
-	sleep(5);
-	
-	&read_messages();
+	&read_messages;
 }
 
 sub end {
@@ -353,7 +350,7 @@ sub rotate_all {
 	# check to see if we can rotate logfiles now
 	my ($keep, $rotate, $compress);
 	for my $rule (@rules) {
-		if ((${$rule}{'file'}) && (${$rule}{'file'} ne "-")) {
+		if ((${$rule}{'file'}) && (-f ${$rule}{'file'}) && (${$rule}{'file'} ne "=")) {
 			# it's a logfile rule -> recover the rotation params
 			if (${$rule}{'keep'}) {
 				$keep = ${$rule}{'keep'};
@@ -376,9 +373,26 @@ sub rotate_all {
 			} else {
 				$compress = "none";
 			}
-			print "${$rule}{'file'}: $keep, $rotate, $compress\n";
 
-#			rotate_file(${$rule}{'file'}, $keep, $compress);
+			my $ctime = ((stat(${$rule}{'file'}))[10]);
+			if (
+				(($rotate eq "hourly") && ($ctime <= (time - 3600))) ||
+				(($rotate eq "daily") && ($ctime <= (time - 80640))) ||
+				(($rotate eq "weekly") && ($ctime <= (time - 564480))) ||
+				(($rotate eq "monthly") && ($ctime <= (time - 2452262))) ) {
+				rotate_file (${$rule}{'file'}, $keep, $compress);
+			} else {
+				for ($rotate) {
+					m/\d+[KMG]$/ && do {
+						$rotate =~ s/K$/000/;
+						$rotate =~ s/M$/000000/;
+						$rotate =~ s/G$/000000000/;
+						if (((stat(${$rule}{'file'}))[7]) >= $rotate) {
+							rotate_file (${$rule}{'file'}, $keep, $compress);
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -390,6 +404,8 @@ sub rotate_file {
 	my $file = shift;
 	my $keep = shift;
 	my $compress = shift;
+
+	send_local ('debug', "Rotating $file");
 
 	my $suffix;
 	if ($compress eq "bzip2") {
