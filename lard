@@ -387,23 +387,24 @@ sub rotate_all {
 			}
 
 			my $ctime = ((stat(${$rule}{'file'}))[10]);
-			if (
-				(($rotate eq "hourly") && ($ctime <= (time - 3600))) ||
-				(($rotate eq "daily") && ($ctime <= (time - 80640))) ||
-				(($rotate eq "weekly") && ($ctime <= (time - 564480))) ||
-				(($rotate eq "monthly") && ($ctime <= (time - 2452262))) ) {
-				rotate_file (${$rule}{'file'}, $keep, $compress);
-			} else {
-				for ($rotate) {
-					m/\d+[KMG]$/ && do {
-						$rotate =~ s/K$/000/;
-						$rotate =~ s/M$/000000/;
-						$rotate =~ s/G$/000000000/;
-						if (((stat(${$rule}{'file'}))[7]) >= $rotate) {
-							rotate_file (${$rule}{'file'}, $keep, $compress);
-						}
+			for ($rotate) {
+				/^(?:hourly|daily|weekly|monthly)$/ && do {
+					if (
+							(($rotate eq "hourly") && ($ctime <= (time - 3600))) ||
+							(($rotate eq "daily") && ($ctime <= (time - 80640))) ||
+							(($rotate eq "weekly") && ($ctime <= (time - 564480))) ||
+							(($rotate eq "monthly") && ($ctime <= (time - 2452262))) ) {
+						rotate_file (${$rule}{'file'}, $keep, $compress);
 					}
-				}
+				};
+				/^(?:\d+[KMG]|\d+)$/ && do {
+					$rotate =~ s/K$/000/;
+					$rotate =~ s/M$/000000/;
+					$rotate =~ s/G$/000000000/;
+					if (((stat(${$rule}{'file'}))[7]) >= $rotate) {
+						rotate_file (${$rule}{'file'}, $keep, $compress);
+					}
+				};
 			}
 		}
 	}
