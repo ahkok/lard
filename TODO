@@ -1,11 +1,10 @@
 
 Current bugs:
 
- * "keep" is ambiguously implemented: it needs 'keep all', 'keep 0'
-   and work as expected.
 
 Current shortcomings:
 
+ * 'keep' misses an 'all' option to retain all logfiles
  * provide STDIN logging so we can function as minilog daemon on
    startup and write directly to logfiles without the need for
    sockets to be active

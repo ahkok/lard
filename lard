@@ -620,7 +620,7 @@ sub rotate_file {
 		# move old files up
 		if ( -f "$file." . $num . "$suffix" ) {
 			if ($num == $keep) {
-				# delete the oldes if it's the last one to keep
+				# delete the oldest if it's the last one to keep
 				unlink "$file." . $num . "$suffix";
 			} else {
 				# move them up
@@ -630,7 +630,11 @@ sub rotate_file {
 	}
 	# now move the current one
 	if ( -f "$file" ) {
-		rename "$file", "$file.1";
+		if ($keep == 0) {
+			unlink ("$file");
+		} else {
+			rename "$file", "$file.1";
+		}
 		# and compress it
 		if (( $compress ne "none" ) && (fork == 0)) {
 			exec("$compress $file.1");
