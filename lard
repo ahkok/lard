@@ -713,6 +713,7 @@ sub write_message {
 					} elsif (defined ${$rule}{'command'}) {
 						# execute a command
 						chomp $output;
+						send_local ('debug', "$id: executing command: \"${$rule}{'command'} \'$output\'\"");
 						if (fork == 0) {
 							# $SIG{CHLD} = 'IGN' || waitpid(-1, WNOHANG)
 							exec("${$rule}{'command'} \'$output\'");
