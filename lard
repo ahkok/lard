@@ -823,7 +823,7 @@ socket or the UDP port in case you listen to remote messages:
 
 =head1 DESCRIPTION
 
-lard is a replacement for styslogd and logrotate in one. It makes 
+lard is a replacement for syslogd, klogd and logrotate in one. It makes 
 a lot of sense to combine the ability of these two programs together
 since the daemon can rotate the logfiles independently of write
 access to logfiles because it knows best when it's writing to them.

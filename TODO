@@ -1,6 +1,9 @@
 
 Current bugs:
 
+ * "keep" is ambiguously implemented: it needs 'keep all', 'keep 0'
+   and work as expected.
+
 Current shortcomings:
 
  * provide STDIN logging so we can function as minilog daemon on
