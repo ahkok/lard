@@ -1,13 +1,17 @@
-#!/usr/bin/perl 
+#!/usr/bin/perl -w
+
 #
-# $Id: syslog-snarf,v 2.1 2004/06/08 07:50:44 jmates Exp $
+# LARD - based on code from syslog-snarf.pl - by
 #
 # The author disclaims all copyrights and releases this document into
 # the public domain.
 #
-# Simple syslogd server for debugging or experimenting with syslog.
+# Lard is a syslogd-like loggin daemon that can rotate logfiles,
+# trigger commands on specific messages and perform regex matching.
 #
-# Run perldoc(1) on this file for additional documentation.
+# see `man lard` and `man lard.conf` for more information, or
+# issue `lard -h`.
+#
 
 use strict;
 
@@ -195,9 +199,7 @@ $id .= "\[$$\]";
 # send out a syslog.notice that we have just started
 send_local ('notice', "$id: started");
 
-&read_messages;
-
-sub read_messages {
+while(1) {
 	# handle messages as usual
 	while (my @ready = $select->can_read) {
 		foreach my $sock (@ready) {
@@ -210,7 +212,6 @@ sub read_messages {
 sub catch_rotate_signal {
 	send_local ('notice', "$id: Received rotation request signal (USR1)");
 	rotate_all();
-	&read_messages;
 }
 
 sub end {
