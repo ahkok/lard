@@ -136,6 +136,92 @@ if ( $opts{'l'} ) {
 	exit;
 }
 
+&parse_config();
+
+for my $rule (@rules) {
+	for my $key (keys %{$rule}) {
+		print "$key => ${$rule}{$key}\n";
+	}
+	print "\n";
+}
+
+# no input checking as let IO::Socket handle any errors
+my (@bind) = ( 'LocalAddr', $opts{'b'} ) if exists $opts{'b'};
+$port = $opts{'p'} if exists $opts{'p'};
+
+##$SIG{'INT'} = sub { exit 0 };	# control+c handler
+
+# start up the syslog server
+
+# listen on the UDP socket
+my $sock1 = IO::Socket::INET->new(
+	Proto     => 'udp',
+	LocalPort => $port,
+	@bind
+ )
+ or die "error: could not start server: errno=$@\n";
+# listen on '/dev/log' socket
+unlink '/dev/log';
+my $sock2 = IO::Socket::UNIX->new(
+	Local   => "/dev/log",
+	Type    => SOCK_DGRAM,
+	Listen  => 0
+ )
+ or die "error: could not start server: errno=$@\n";
+chmod 0666, '/dev/log';
+
+$| = 1;												# autoflush output
+
+#nonblock($sock1);
+#nonblock($sock2);
+
+my $select = IO::Select->new();
+$select->add($sock1);
+$select->add($sock2);
+
+# and add the signal hook:
+$SIG{'USR2'} = \&catch_rotate_signal;
+$SIG{'TERM'} = \&end;
+$SIG{'HUP'} = \&end;
+
+# fork into the background unless we don't want that
+my $pid;
+($opts{'n'}) or ($pid = fork and exit);
+
+# send out a syslog.notice that we have just started
+send_local ('notice', 'started');
+
+&read_messages;
+
+sub read_messages {
+	# handle messages as usual
+	while (my @ready = $select->can_read) {
+		foreach my $sock (@ready) {
+			handle ($sock);
+		}
+	}
+}
+
+# add signal handler to trigger rotation
+sub catch_rotate_signal {
+	send_local ("notice", "Received rotation request signal (USR2)");
+	rotate_all();
+
+	sleep(5);
+	
+	&read_messages();
+}
+
+sub end {
+	# send out a syslog.notice that we are exiting, but only for
+	($pid) or send_local ( 'notice', 'shuting down...');
+	$sock1->close if $sock1;
+	$sock2->close if $sock2;
+}
+
+END {
+	end;
+}
 
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
@@ -263,8 +349,6 @@ sub parse_config {
 	}
 }
 
-parse_config;
-
 sub rotate_all {
 	# check to see if we can rotate logfiles now
 	my ($keep, $rotate, $compress);
@@ -293,6 +377,8 @@ sub rotate_all {
 				$compress = "none";
 			}
 			print "${$rule}{'file'}: $keep, $rotate, $compress\n";
+
+#			rotate_file(${$rule}{'file'}, $keep, $compress);
 		}
 	}
 }
@@ -333,52 +419,6 @@ sub rotate_file {
 		}
 	}
 }
-
-for my $rule (@rules) {
-	for my $key (keys %{$rule}) {
-		print "$key => ${$rule}{$key}\n";
-	}
-	print "\n";
-}
-
-# no input checking as let IO::Socket handle any errors
-my (@bind) = ( 'LocalAddr', $opts{'b'} ) if exists $opts{'b'};
-$port = $opts{'p'} if exists $opts{'p'};
-
-##$SIG{'INT'} = sub { exit 0 };	# control+c handler
-
-# start up the syslog server
-
-# listen on the UDP socket
-my $sock1 = IO::Socket::INET->new(
-	Proto     => 'udp',
-	LocalPort => $port,
-	@bind
- )
- or die "error: could not start server: errno=$@\n";
-# listen on '/dev/log' socket
-unlink '/dev/log';
-my $sock2 = IO::Socket::UNIX->new(
-	Local   => "/dev/log",
-	Type    => SOCK_DGRAM,
-	Listen  => 0
- )
- or die "error: could not start server: errno=$@\n";
-chmod 0666, '/dev/log';
-
-$| = 1;												# autoflush output
-
-#nonblock($sock1);
-#nonblock($sock2);
-
-my $select = IO::Select->new();
-$select->add($sock1);
-$select->add($sock2);
-
-# and add the signal hook:
-$SIG{'USR2'} = \&catch_rotate_signal;
-$SIG{'TERM'} = \&end;
-$SIG{'HUP'} = \&end;
 
 # this is the incoming message handler
 sub handle {
@@ -528,39 +568,6 @@ sub handle {
 			}
 		}
 	}
-}
-
-# fork into the background unless we don't want that
-my $pid;
-($opts{'n'}) or ($pid = fork and exit);
-
-# send out a syslog.notice that we have just started
-send_local ('notice', 'started');
-
-sub end {
-	# send out a syslog.notice that we are exiting, but only for
-	($pid) or send_local ( 'notice', 'shuting down...');
-	$sock1->close if $sock1;
-	$sock2->close if $sock2;
-}
-
-END {
-	end;
-}
-
-# handle messages as usual
-my @ready;
-while(@ready = $select->can_read) {
-	my $sock;
-	foreach $sock (@ready) {
-		handle ($sock);
-	}
-}
-
-# add signal handler to trigger rotation
-sub catch_rotate_signal {
-	send_local ("notice", "Received rotation request signal (USR2)");
-	rotate_all;
 }
 
 
