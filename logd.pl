@@ -35,7 +35,7 @@ my $port = 514;
 my $max_msg_len	= 5000;
 my $msg_len_warn = 1024;
 
-use vars qw(@rules @words $word %rule %option %opts $PRI_data_re $HEADER_MSG_re_syslog_ng);
+use vars qw(@rules %option %opts $PRI_data_re $HEADER_MSG_re_syslog_ng);
 
 
 # to match PRI header plus remaining fields
@@ -136,19 +136,6 @@ if ( $opts{'l'} ) {
 	exit;
 }
 
-#
-# read and parse rules
-#
-local *CONF;
-open(CONF, "/etc/logd.conf");
-while (<CONF>) {
-	s/#.*$//g;
-	foreach $word (m/(\x22[^\x22]+\x22|\x27[^\x27]+\x27|\x60[^\x60]+\x60|[0-9a-zA-Z\x21\x23-\x26\x2a-\x3a\x3c-\x7a\x7c\x7e\x7f]+|\x28|\x29|\x7b|\x7d|\x3b)/g) {
-		push @words, $word;
-	}
-}
-close (CONF);
-
 
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
@@ -195,28 +182,44 @@ sub format_message {
 }
 
 
-# while ( local $_ = shift @words ) {
-while ($word = shift @words) {
-	for ($word) {
+sub parse_config {
+	# read and parse rules from the config file
+	my @words;
+	local *CONF;
+	open(CONF, "/etc/logd.conf");
+	while (<CONF>) {
+		s/#.*$//g;
+		for (m/(\x22[^\x22]+\x22|\x27[^\x27]+\x27|\x60[^\x60]+\x60|[0-9a-zA-Z\x21\x23-\x26\x2a-\x3a\x3c-\x7a\x7c\x7e\x7f]+|\x28|\x29|\x7b|\x7d|\x3b)/g) {
+			push @words, $_;
+		}
+	}
+	close (CONF);
+
+	my %rule;
+	undef %rule;
+	# while ($word = shift @words) {
+	while ( local $_ = shift @words ) {
+	#	for ($word) {
 		/^(?:file|pipe|command|host)$/ && do {
-			if (defined %rule) {
+			if (%rule) {
 				push @rules, {%rule};
 				undef %rule;
+			} else {
 			}
 			# create a new rule
-			$rule{$word} = unquote ( shift @words );
+			$rule{$_} = unquote ( shift @words );
 			next;
 		};
 		/^(?:log|timeformat|format|keep|rotate|compress|match)$/ && do {
-			if (! defined %rule) {
-				$option{$word} = unquote ( shift @words );
+			if (! %rule) {
+				$option{$_} = unquote ( shift @words );
 			} else {
 				# global options
-				$rule{$word} = unquote ( shift @words );
+				$rule{$_} = unquote ( shift @words );
 				# create binary mask for facility.priority
 				/^log$/ && do {
 					# set the default mask to full
-					my ( $fac, $pri ) = split ( /\./, $rule{$word} );
+					my ( $fac, $pri ) = split ( /\./, $rule{$_} );
 					# facility
 					if ( $fac eq '*' ) {
 						$rule{'fac_mask'} = $fac_mask_full;
@@ -253,11 +256,57 @@ while ($word = shift @words) {
 			next;
 		}
 	}
+
+	# add the last rule in case it's there
+	if (%rule) {
+		push @rules, {%rule};
+	}
 }
 
-# add the last rule in case it's there
-if (defined %rule) {
-	push @rules, {%rule};
+parse_config;
+
+sub rotate_file {
+	# takes a filename as argument #1
+	# numer of rotations as #2
+	# compression method as #3
+	my $file = shift;
+	my $keep = shift;
+	my $compress = shift;
+
+	my $suffix;
+	if ($compress eq "bzip2") {
+		$suffix = ".bz2";
+	} elsif ($compress eq "gzip") {
+		$suffix = ".gz";
+	}
+
+	for ( my $num = $keep; $num > 0 ; $num-- ) {
+		# move old files up
+		if ( -f "$file." . $num . "$suffix" ) {
+			if ($num == $keep) {
+				# delete the oldes if it's the last one to keep
+				unlink "$file." . $num . "$suffix";
+			} else {
+				# move them up
+				rename "$file." . $num . "$suffix", "$file." . ($num+1) . "$suffix";
+			}
+		}
+	}
+	# now move the current one
+	if ( -f "$file" ) {
+		rename "$file", "$file.1";
+		# and compress it
+		if (fork == 0) {
+			exec("$compress $file.1");
+		}
+	}
+}
+
+for my $rule (@rules) {
+	for my $key (keys %{$rule}) {
+		print "$key => ${$rule}{$key}\n";
+	}
+	print "\n";
 }
 
 # no input checking as let IO::Socket handle any errors
@@ -270,7 +319,7 @@ $SIG{'INT'} = sub { exit 0 };	# control+c handler
 
 # listen on the UDP socket
 my $sock1 = IO::Socket::INET->new(
-	Proto		 => 'udp',
+	Proto     => 'udp',
 	LocalPort => $port,
 	@bind
  )
@@ -278,9 +327,9 @@ my $sock1 = IO::Socket::INET->new(
 # listen on '/dev/log' socket
 unlink '/dev/log';
 my $sock2 = IO::Socket::UNIX->new(
-	Local		 => "/dev/log",
-	Type			=> SOCK_DGRAM,
-	Listen		=> 0
+	Local   => "/dev/log",
+	Type    => SOCK_DGRAM,
+	Listen  => 0
  )
  or die "error: could not start server: errno=$@\n";
 chmod 0666, '/dev/log';
@@ -370,6 +419,8 @@ sub handle {
 		 $message{'HOSTNAME'}, $message{'MSG'}
 		)
 		 = ( $1, str2time ($2), $message{'peerhost'}, $3 );
+		# solaris' syslogd passes the fac.pri tuple, get rid if it:
+		$message{'MSG'} =~ s/ $message{'facility'}\.$message{'priority'}// ;
 	} else {
 		(
 		 $message{'HEADER'},	 $message{'TIME'},
@@ -428,10 +479,10 @@ sub handle {
 					} elsif (defined ${$rule}{'command'}) {
 						# execute a command
 						chomp $output;
-						system("${$rule}{'command'} \'$output\' &");
-						# if (fork == 0) { exec($rule->{command}, $output) or die $!; }
-						# if (fork == 0) { $< = $> = $( = $) = 65535; exec($rule->{command}, $output) or die $!; }
-						# $SIG{CHLD} = 'IGN' || waitpid(-1, WNOHANG)
+						if (fork == 0) {
+							# $SIG{CHLD} = 'IGN' || waitpid(-1, WNOHANG)
+							exec("${rule}{'command'} \'$output\'");
+						}
 					} elsif (defined ${$rule}{'host'}) {
 						# log to a remote host
 						send_remote ( ${$rule}{'host'}, \%message );
