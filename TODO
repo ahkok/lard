@@ -6,12 +6,10 @@ Current shortcomings:
  * provide STDIN logging so we can function as minilog daemon on
    startup and write directly to logfiles without the need for
    sockets to be active
- * Implement HUP signal to reread config && restart daemon
  * pipe functionality is not implemented
  * the parser is too forgiving (error checking)
  * socket nodelay option?
  * test with syslog-ng for rule parsing
- * -- MARK -- timestamps are missing (requires timer)
 
 Wishlist items:
 
