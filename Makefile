@@ -21,7 +21,7 @@ man:
 clean:
 	rm lard.8 lard.conf.5
 
-dist:
+dist: man
 	mkdir lard-$(VERSION)
 	cp lard lard.conf Makefile lard.8 lard.conf.5 lard.conf.pod lard-$(VERSION)/
 	tar cjf lard-$(VERSION).tar.bz2 lard-$(VERSION)/
