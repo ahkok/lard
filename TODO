@@ -3,6 +3,10 @@ Current bugs:
 
 Current shortcomings:
 
+ * provide STDIN logging so we can function as minilog daemon on
+   startup and write directly to logfiles without the need for
+   sockets to be active
+ * provide /proc/kmsg reading to make klogd obsolete
  * Implement HUP signal to reread config && restart daemon
  * pipe functionality is not implemented
  * the parser is too forgiving (error checking)
