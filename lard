@@ -25,7 +25,7 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime);
 
-use vars qw(@rules %option %opts %sockets);
+use vars qw(@rules %option %opts %sockets $mark_timeout);
 
 my $stampfile = "/var/state/lard";
 
@@ -107,6 +107,9 @@ for my $key (keys %syslog_priorities) {
 	$syslog_priorities_rv{$syslog_priorities{$key}} = $key;
 }
 
+# set the mark timeout to a decent default (20 mintes):
+$mark_timeout = 1200;
+
 # format our $id
 my $id = $0;
 $id =~ s/.*\///;
@@ -157,6 +160,7 @@ $SIG{'USR1'} = \&catch_rotate_signal;
 $SIG{'TERM'} = \&end;
 $SIG{'INT'} = \&end;
 $SIG{'HUP'} = \&reload;
+$SIG{'ALRM'} = \&mark;
 
 
 while(1) {
@@ -202,6 +206,12 @@ sub end {
 	unlink ("$pidfile") if not exists $opts{'s'};
 	&close_handles;
 	exit 0;
+}
+
+
+sub mark {
+	&write_raw_message('kern', 'info', '-- MARK --' );
+	alarm $mark_timeout;
 }
 
 
@@ -301,7 +311,12 @@ sub get_kmsg_socket() {
 sub send_local {
 	# send a message to ourselves locally, so it can be parsed and passed
 	# through our ruleset
-	my $fac = 'syslog';
+	write_raw_message ('syslog', shift, shift);
+}
+
+
+sub write_raw_message {
+	my $fac = shift;
 	my $pri = shift;
 	my $fac_code = $syslog_facilities_rv{$fac};
 	my $pri_code = $syslog_priorities_rv{$pri};
@@ -390,19 +405,22 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
 				/^(?:match|log)$/ && do {
 					die "error: \"$_\" keyword may only be used in rules";
 				};
 				$option{$_} = unquote ( shift @words );
 			} else {
-				/^(?:socket|listen)$/ && do {
+				/^(?:socket|listen|mark)$/ && do {
 					die "error: \"$_\" keyword may not be used in rules";
 				};
 				# global options
 				$rule{$_} = unquote ( shift @words );
 				# create binary mask for facility.priority
+				/^mark$/ && do {
+					$mark_timeout = unquote ( shift @words );
+				};
 				/^log$/ && do {
 					# set the default mask to full
 					my ( $fac, $pri ) = split ( /\./, $rule{$_} );
@@ -689,6 +707,8 @@ sub read_message_from_socket {
 
 
 sub write_message {
+	# delay -- MARK -- messages
+	alarm $mark_timeout;
 	# write a message hash to the appropriate logfiles
 	my %message = %{ shift() };
 

@@ -34,6 +34,12 @@ will listen on in remote reception mode (B<-r>).
 Define an alternative UNIX socket to look for incoming local syslog
 messages instead of '/dev/log'/
 
+=item B<mark> {seconds}
+
+Change the default number of seconds that the logging daemon will
+log a heartbeat timestamp using '-- MARK --'. The default is 20
+minutes. Setting this to '0' disabled logging of these marks.
+
 =back
 
 =head2 Rules
