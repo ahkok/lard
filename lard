@@ -122,11 +122,14 @@ for my $key (keys %syslog_priorities) {
 	$syslog_priorities_rv{$syslog_priorities{$key}} = $key;
 }
 
-my $VERSION;
-( $VERSION = '$Revision: 2.1 $ ' ) =~ s/[^0-9.]//g;
+# format our $id
+my $id = $0;
+$id =~ s/.*\///;
+
+my $VERSION = "0.1";
 
 # parse command-line options
-getopts 'h?rns', \%opts;
+getopts 'h?rnsf:', \%opts;
 
 print_help() if exists $opts{'h'} or exists $opts{'?'};
 
@@ -194,8 +197,6 @@ $SIG{'HUP'} = \&end;
 my $pid;
 ($opts{'n'}) or ($pid = fork and exit);
 
-my $id = $0;
-$id =~ s/.*\///;
 $id .= "\[$$\]";
 
 # send out a syslog.notice that we have just started
@@ -284,7 +285,9 @@ sub parse_config {
 
 	# read and parse rules from the config file
 	local *CONF;
-	open(CONF, "/etc/lard.conf");
+	my $conf = "/etc/lard.conf";
+	$conf = $opts{'f'} if exists $opts{'f'};
+	open(CONF, "$conf") or die "error: cannot open configuration file \"$opts{'f'}\"";
 	while (<CONF>) {
 		s/#.*$//g;
 		for (m/(\x22[^\x22]+\x22|\x27[^\x27]+\x27|\x60[^\x60]+\x60|[0-9a-zA-Z\x21\x23-\x26\x2a-\x3a\x3c-\x7a\x7c\x7e\x7f]+|\x28|\x29|\x7b|\x7d|\x3b)/g) {
@@ -307,7 +310,7 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
 			if (! %rule) {
 				$option{$_} = unquote ( shift @words );
 			} else {
@@ -536,9 +539,8 @@ sub read_message_from_socket {
 		)
 		 = ( '', time , $message{'peerhost'}, $header_msg );
 	}
-	( $message{'HOSTNAME'}, my $junk ) = split ( /\./, $message{'HOSTNAME'} );
 
-	if ( $opts{v} and @errors ) {
+	if ( $opts{'v'} and @errors ) {
 		warn "error: $_\n" for @errors;
 	}
 
@@ -555,6 +557,12 @@ sub write_message {
 		# perform a match on $message{'facility|priority'}
 		if ( ( ${$rule}{'pri_mask'} & ( 2<<$message{'priority_code'}) ) &&
 				( ${$rule}{'fac_mask'} & ( 2<<$message{'facility_code'}) ) ) {
+			# strip the hostname down if requested:
+			if (${$rule}{'domain'}) {
+				$message{'HOSTNAME'} =~ s/\.${$rule}{'domain'}//;
+			} elsif (exists $option{'domain'}) {
+				$message{'HOSTNAME'} =~ s/\.$option{'domain'}//;
+			}
 			# create the output format message now
 			my $output;
 			# figure out what timestamp format we need
@@ -623,6 +631,7 @@ Options for lard:
     -n       Do not daemonize: stay in the foreground
     -s       Send a running lard daemon a rotate signal. If no
              running instance is found, rotate files and exit
+    -f conf  Specify an alternative configuration file
 
 See lard(8) and lard.conf(5) for additional documentation
 
