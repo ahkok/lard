@@ -3,6 +3,7 @@ Current bugs:
 
 Current shortcomings:
 
+ * Implement HUP signal to reread config && restart daemon
  * pipe functionality is not implemented
  * the parser is too forgiving (error checking)
  * socket nodelay option?
