@@ -130,9 +130,11 @@ $id =~ s/.*\///;
 my $VERSION = "0.1";
 
 # parse command-line options
-getopts 'h?rnsf:', \%opts;
+getopts 'h?rnsf:v', \%opts;
 
 print_help() if exists $opts{'h'} or exists $opts{'?'};
+
+print "$VERSION\n" and exit if exists $opts{'v'};
 
 &parse_config();
 
@@ -257,7 +259,9 @@ sub end {
 }
 
 END {
-	unlink ("$pidfile") if not exists $opts{'s'};
+	if ($pidfile) {
+		unlink ("$pidfile") if not exists $opts{'s'};
+	}
 	$sock1->close if $sock1;
 	$sock2->close if $sock2;
 }
