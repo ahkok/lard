@@ -1,0 +1,17 @@
+
+Current bugs:
+
+ * none found
+
+Current shortcomings:
+
+ * pipe functionality is not implemented
+ * the parser is too forgiving (error checking)
+ * socket nodelay option?
+ * test with syslog-ng for rule parsing
+
+Wishlist items:
+
+ * postrotate hooks to signal apache/squid etc
+ * set owner/perms of logfiles
+
