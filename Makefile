@@ -19,7 +19,7 @@ man:
 	pod2man lard.conf.pod lard.conf.5
 
 clean:
-	rm lard.8 lard.conf.5
+	rm -f lard.8 lard.conf.5 lard-$(VERSION).tar.bz2
 
 dist: man
 	mkdir lard-$(VERSION)
