@@ -127,7 +127,7 @@ for my $key (keys %syslog_priorities) {
 my $id = $0;
 $id =~ s/.*\///;
 
-my $VERSION = "0.1";
+my $VERSION = "0.1.1";
 
 # parse command-line options
 getopts 'h?rnsf:v', \%opts;
