@@ -647,6 +647,8 @@ sub write_message {
 	# here we traverse our logging rules and apply the proper procedure
 	# (multiple actions possible)
 	for my $rule (@rules) {
+		# do not attempt to match rules that are for rotation-only files:
+                (${$rule}{'log'}) or next;
 		# perform a match on $message{'facility|priority'}
 		if ( ( ${$rule}{'pri_mask'} & ( 2<<$message{'priority_code'}) ) &&
 				( ${$rule}{'fac_mask'} & ( 2<<$message{'facility_code'}) ) ) {
