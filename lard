@@ -51,7 +51,7 @@ my $PRI_data_re = qr/^ < (\d{1,3}) > (.*) /x;
 my $HEADER_MSG_re_syslog_ng = qr/^ ((	# match HEADER, TIMESTAMP for reference
 	(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)	# Month
 	(?:[ ][ ]\d|[ ]\d\d) # day of month, '	5' or ' 10'
-	[ ] \d\d:\d\d:\d\d)	 # timestamp
+	[ ] \d\d:\d\d:\d\d)  # timestamp
 	[ ] ([\w@.:-]+)      # HOSTNAME host|IPv4|IPv6 (syslog-ng prefixes foo@?)
 	)                    # close match on HEADER
 	[ ] (.*)             # MSG data
@@ -127,7 +127,7 @@ for my $key (keys %syslog_priorities) {
 my $id = $0;
 $id =~ s/.*\///;
 
-my $VERSION = "0.1.1";
+my $VERSION = "0.1.2";
 
 # parse command-line options
 getopts 'h?rnsf:v', \%opts;
@@ -611,13 +611,7 @@ sub read_message_from_socket {
 
 	# TODO is syslog-ng adding \n to the data already?
 	chomp $header_msg;
-	if ( $header_msg =~ m/$HEADER_MSG_re_syslog_ng/o ) {
-		(
-			$message{'HEADER'},	 $message{'TIME'},
-			$message{'HOSTNAME'}, $message{'MSG'}
-		)
-		 = ( $1, str2time ($2), $3, $4 );
-	} elsif ( $header_msg =~ m/$HEADER_MSG_re_solaris/o ) {
+	if ( $header_msg =~ m/$HEADER_MSG_re_solaris/o ) {
 		(
 		 $message{'HEADER'},	 $message{'TIME'},
 		 $message{'HOSTNAME'}, $message{'MSG'}
@@ -625,6 +619,12 @@ sub read_message_from_socket {
 		 = ( $1, str2time ($2), $message{'peerhost'}, $3 );
 		# solaris' syslogd passes the fac.pri tuple, get rid if it:
 		$message{'MSG'} =~ s/ $message{'facility'}\.$message{'priority'}// ;
+	} elsif ( $header_msg =~ m/$HEADER_MSG_re_syslog_ng/o ) {
+		(
+			$message{'HEADER'},	 $message{'TIME'},
+			$message{'HOSTNAME'}, $message{'MSG'}
+		)
+		 = ( $1, str2time ($2), $3, $4 );
 	} else {
 		(
 		 $message{'HEADER'},	 $message{'TIME'},
@@ -648,7 +648,7 @@ sub write_message {
 	# (multiple actions possible)
 	for my $rule (@rules) {
 		# do not attempt to match rules that are for rotation-only files:
-                (${$rule}{'log'}) or next;
+		(${$rule}{'log'}) or next;
 		# perform a match on $message{'facility|priority'}
 		if ( ( ${$rule}{'pri_mask'} & ( 2<<$message{'priority_code'}) ) &&
 				( ${$rule}{'fac_mask'} & ( 2<<$message{'facility_code'}) ) ) {
