@@ -210,7 +210,7 @@ sub reload {
 
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
-	($pid) or send_local ( 'notice', "$id: Shuting down");
+	($pid) or send_local ( 'notice', "$id: Shutting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
 	&close_handles;
 	exit 0;
