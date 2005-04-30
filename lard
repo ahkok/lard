@@ -144,14 +144,18 @@ my $select = IO::Select->new();
 
 # fork into the background unless we don't want that
 if ($opts{'n'}) {
-  &write_pid($$);
+	&write_pid($$);
 } else {
-  if ($pid = fork) {
-	# write the proper PID:
-    &write_pid($pid);
-	# and exit after!
-    exit;
-  }
+	if ($pid = fork) {
+		# write the proper PID:
+		&write_pid($pid);
+		# and exit after!
+		exit;
+  	} else {
+		# disown stdin/stdout so errors don't end up on the terminal
+		open STDIN, '/dev/null' or die "Can't read /dev/null: $!";
+		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
+	}
 }
 
 # now we know for sure:
