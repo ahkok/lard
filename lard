@@ -155,6 +155,7 @@ if ($opts{'n'}) {
 		# disown stdin/stdout so errors don't end up on the terminal
 		open STDIN, '/dev/null' or die "Can't read /dev/null: $!";
 		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
+		open STDERR, '>&STDOUT' or die "Can't dup stdout: $!";
 	}
 }
 
