@@ -23,7 +23,7 @@ use Sys::Hostname;
 
 use Getopt::Std;
 use Date::Parse;
-use POSIX qw(strftime);
+use POSIX qw(strftime setsid);
 
 use vars qw(@rules %option %opts %sockets $mark_timeout);
 
@@ -156,6 +156,7 @@ if ($opts{'n'}) {
 		open STDIN, '/dev/null' or die "Can't read /dev/null: $!";
 		open STDOUT, '>/dev/null' or die "Can't write to /dev/null: $!";
 		open STDERR, '>&STDOUT' or die "Can't dup stdout: $!";
+		setsid or die "Can't start a new session: $!";
 	}
 }
 
