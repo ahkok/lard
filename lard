@@ -25,7 +25,7 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime setsid);
 
-use vars qw(@rules %option %opts %sockets $mark_timeout);
+use vars qw(@rules @posts %option %opts %sockets $mark_timeout);
 
 # define some globals
 my $VERSION = "0.1.4";
@@ -117,9 +117,9 @@ for my $key (keys %syslog_priorities) {
 $mark_timeout = 1200;
 
 # parse command-line options
-getopts 'fh?Knrs:v', \%opts;
+getopts 'fhKnrs:v', \%opts;
 
-print_help() if exists $opts{'h'} or exists $opts{'?'};
+print_help() if exists $opts{'h'};
 
 print "$VERSION\n" and exit if exists $opts{'v'};
 
@@ -419,9 +419,9 @@ sub parse_config {
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|match)$/ && do {
+		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|match|post)$/ && do {
 			if (! %rule) {
-				/^(?:match|log)$/ && do {
+				/^(?:match|log|post)$/ && do {
 					die "error: \"$_\" keyword may only be used in rules";
 				};
 				$option{$_} = unquote ( shift @words );
@@ -551,7 +551,8 @@ sub write_timestamp {
 
 sub rotate_all {
 	# check to see if we can rotate logfiles now
-	my ($keep, $rotate, $compress);
+	my ($keep, $rotate, $compress, $post);
+	@posts = ();
 	for my $rule (@rules) {
 		if ((${$rule}{'file'}) && (-f ${$rule}{'file'}) && (${$rule}{'file'} ne "=")) {
 			# it's a logfile rule -> recover the rotation params
@@ -576,6 +577,11 @@ sub rotate_all {
 			} else {
 				$compress = "none";
 			}
+			if (${$rule}{'post'}) {
+				$post = ${$rule}{'post'};
+			} else {
+				$post = "";
+			}
 
 			my $ctime = get_timestamp(${$rule}{'file'});
 			for ($rotate) {
@@ -586,6 +592,9 @@ sub rotate_all {
 							(($rotate eq "weekly") && ($ctime < (time - 564480))) ||
 							(($rotate eq "monthly") && ($ctime < (time - 2452262))) ) {
 						rotate_file (${$rule}{'file'}, $keep, $compress);
+						if (( $post ne "" ) && ( ! grep( /^$post\$/, @posts) )) {
+							push @posts, $post;
+						}
 						write_timestamp(${$rule}{'file'});
 					}
 					next;
@@ -596,10 +605,19 @@ sub rotate_all {
 					$rotate =~ s/G$/000000000/;
 					if (((stat(${$rule}{'file'}))[7]) >= $rotate) {
 						rotate_file (${$rule}{'file'}, $keep, $compress);
+						if (( $post ne "" ) && ( ! grep( /^$post\$/, @posts) )) {
+							push @posts, $post;
+						}
 					}
 					next;
 				};
 			}
+		}
+	}
+	# run all 'post' commands
+	foreach $post (@posts) {
+		if (( $post ne "" ) && (fork == 0)) {
+			exec("$post");
 		}
 	}
 }
@@ -620,6 +638,8 @@ sub rotate_file {
 		$suffix = ".bz2";
 	} elsif ($compress eq "gzip") {
 		$suffix = ".gz";
+	} else {
+		$suffix = "";
 	}
 
 	for ( my $num = $keep; $num > 0 ; $num-- ) {
@@ -856,11 +876,13 @@ date/time formats. Per logfile/command these options can be adjusted.
 
 Rotation can be done based on time or size. Time rotation data
 is kept in a separate file and thus on the first run may not be accurate.
+Post-rotate commands can be passed and are started after all files have
+been rotated. Lard filters out any duplicate post-rotate commands.
 
 Rotation is not automatically triggered. However, you must signal
 a running lard instance that it is time to rotate the logfiles it
 keeps track of. The signal for this is SIGURS1. You can also
-call lart with the -s option to do this automatically, without
+call lard with the -s option to do this automatically, without
 the need to lookup the PID (which is kept by default in
 /var/run/lard.pid).
 

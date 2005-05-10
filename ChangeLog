@@ -1,4 +1,6 @@
 0.1.5 -
+
+	* Add 'post {command} keyword for post-rotate actions
 	* Add code to detach the daemon from stdio/err
 	* Allow 'keep 0' to work properly
 

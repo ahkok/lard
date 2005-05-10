@@ -72,6 +72,12 @@ commandline parameter to the command. This may be unsafe!
 Define a new rule that sends matching messages to a remote
 logging host.
 
+=item B<post> {command}
+
+Define a command to be executed once the target file is rotated. Lard
+will take care not to run the same command twice in a row and thus you
+can re-use the command as often as you wish.
+
 =back
 
 The options below (with the exception of B<log> and B<match>) can be

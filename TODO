@@ -15,7 +15,6 @@ Current shortcomings:
 
 Wishlist items:
 
- * postrotate hooks to signal apache/squid etc
  * set owner/perms of logfiles
  * remove syslog_ng crap and unify pattern matching
 
