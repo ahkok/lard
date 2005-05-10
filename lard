@@ -25,10 +25,10 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime setsid);
 
-use vars qw(@rules @posts %option %opts %sockets $mark_timeout);
+use vars qw(@rules %option %opts %sockets $mark_timeout);
 
 # define some globals
-my $VERSION = "0.1.4";
+my $VERSION = "0.1.5";
 my $stampfile = "/var/state/lard";
 my $id = $0;
 $id =~ s/.*\///;
@@ -552,7 +552,7 @@ sub write_timestamp {
 sub rotate_all {
 	# check to see if we can rotate logfiles now
 	my ($keep, $rotate, $compress, $post);
-	@posts = ();
+	my @posts = ();
 	for my $rule (@rules) {
 		if ((${$rule}{'file'}) && (-f ${$rule}{'file'}) && (${$rule}{'file'} ne "=")) {
 			# it's a logfile rule -> recover the rotation params
