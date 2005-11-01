@@ -138,6 +138,22 @@ all messages that appear to be coming from the ssh daemon:
 
     match " sshd\[\d+\]: "
 
+=item B<filter> {expression}
+
+Additionally to specifying a certain patter that the message
+needs to fit to (a regular expression), you can also remove
+unwanted log messages with one or more filter statements. If
+any message in the rule matches the filter, it is discarded
+and not logged.
+
+    filter "uninteresting message"
+
+Both B<match> and B<filter> may be specified multiple time per
+rule, and applied as follows: if no match rule is present, of
+if any match rule matches the message, apply filters, otherwise
+discard the message. If any filter matches, discard the message
+as well.
+
 =item B<format> {format-string}
 
 The format string allows you to specify an alternative message

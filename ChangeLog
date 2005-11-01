@@ -1,3 +1,11 @@
+0.1.6 - 20051031
+
+	* Add -d option which implies -n - debug info
+	* Multiplexed 'match' option, it may now be specified
+	  multiple times
+	* Added 'filter' option, can be applied multiple times
+	  and is applied after match rules.
+
 0.1.5 - 20050511
 
 	* Add 'post {command} keyword for post-rotate actions
