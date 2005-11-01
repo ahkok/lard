@@ -28,7 +28,7 @@ use POSIX qw(strftime setsid);
 use vars qw(@rules %option %opts %sockets $mark_timeout);
 
 # define some globals
-my $VERSION = "0.1.5";
+my $VERSION = "0.1.6";
 my $stampfile = "/var/state/lard";
 my $id = $0;
 $id =~ s/.*\///;
@@ -113,15 +113,28 @@ for my $key (keys %syslog_priorities) {
 	$syslog_priorities_rv{$syslog_priorities{$key}} = $key;
 }
 
+# some global base-level functions
+sub debug {
+	my $msg = shift;
+	if ( $opts{'d'} ) {
+		print STDERR $msg;
+	}
+}
+
+
 # set the mark timeout to a decent default (20 mintes):
 $mark_timeout = 1200;
 
 # parse command-line options
-getopts 'fhKnrs:v', \%opts;
+getopts 'dfhKnrs:v', \%opts;
 
 print_help() if exists $opts{'h'};
 
 print "$VERSION\n" and exit if exists $opts{'v'};
+
+if ( exists $opts{'d'} ) {
+	$opts{'n'} = 1;
+}
 
 &parse_config();
 
@@ -164,7 +177,8 @@ if ($opts{'n'}) {
 $id .= "\[$$\]";
 
 # send out a syslog.notice that we have just started
-send_local ('notice', "$id: started");
+debug "$id: Started, version $VERSION\n";
+send_local ('notice', "$id: Started, version $VERSION");
 
 # and add the signal hook:
 $SIG{'USR1'} = \&catch_rotate_signal;
@@ -403,38 +417,64 @@ sub parse_config {
 	close (CONF);
 
 	my %rule;
+	my @filters;
+	my @matches;
 	undef %rule;
+	undef @filters;
+	undef @matches;
 	# while ($word = shift @words) {
 	while ( local $_ = shift @words ) {
+		debug "Processing keyword: $_\n";
 		/^(?:file|pipe|command|host)$/ && do {
 			/^pipe$/ && do {
 				die "error: \"pipe\" rule not implemented yet";
 			};
 			if (%rule) {
+				debug "Finished rule.\n";
 				# store last rule if it exists
+				if ( @filters ) { $rule{'filter'} = [ @filters ]; };
+				if ( @matches ) { $rule{'match'} = [ @matches ]; };
 				push @rules, {%rule};
 				undef %rule;
+				undef @filters;
+				undef @matches;
 			}
 			# create a new rule
+			debug "Started new $_ rule.\n";
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
-		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|match|post)$/ && do {
+		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|filter|match|post)$/ && do {
 			if (! %rule) {
-				/^(?:match|log|post)$/ && do {
+				/^(?:filter|match|log|post)$/ && do {
 					die "error: \"$_\" keyword may only be used in rules";
 				};
+				debug "Setting/changing global value for $_ .\n";
 				$option{$_} = unquote ( shift @words );
 			} else {
 				/^(?:socket|listen|mark)$/ && do {
 					die "error: \"$_\" keyword may not be used in rules";
 				};
+				# filter/match criteria
+				/^filter$/ && do {
+					my $f = unquote ( shift @words ) ;
+					debug "adding $_ : $f\n";
+					push @filters, $f ;
+					next;
+				};
+				/^match$/ && do {
+					my $f = unquote ( shift @words ) ;
+					debug "adding $_ : $f\n";
+					push @matches, $f ;
+					next;
+				};
 				# global options
-				$rule{$_} = unquote ( shift @words );
-				# create binary mask for facility.priority
 				/^mark$/ && do {
 					$mark_timeout = unquote ( shift @words );
+					next;
 				};
+				$rule{$_} = unquote ( shift @words );
+				# create binary mask for facility.priority
 				/^log$/ && do {
 					# set the default mask to full
 					my ( $fac, $pri ) = split ( /\./, $rule{$_} );
@@ -496,8 +536,12 @@ sub parse_config {
 
 	# add the last rule in case it's there
 	if (%rule) {
+		debug "Finished rule.\n";
+		if ( @filters ) { $rule{'filter'} = [ @filters ]; };
+		if ( @matches ) { $rule{'match'} = [ @matches ]; };
 		push @rules, {%rule};
 	}
+	debug "Finished processing config file.\n";
 }
 
 
@@ -744,6 +788,53 @@ sub read_message_from_socket {
 }
 
 
+sub match {
+	# apply match rules to $output
+	my $output = shift();
+	my %rule = %{ shift() };
+	# always match when no match rule is present
+	if ( ! defined $rule{'match'} ) {
+		return 1;
+	};
+	my @matches = @{ $rule{'match'} } ;
+	# return true on first match
+	foreach my $match ( @matches ) {
+		debug "Applying match $match\n";
+		for ( $output ) {
+			m/$match/ && do {
+				return 1;
+			}
+		}
+	}
+	# return false if nothing matched.
+	return 0;
+}
+
+
+sub filter {
+	# apply filter rules to $output: true == passes filters
+	my $output = shift();
+	my %rule = %{ shift() };
+	# always filter when no filter rule is present
+	if ( ! defined $rule{'filter'} ) {
+		return 1;
+	};
+	my @filters = @{ $rule{'filter'} } ;
+	# return true on first filter
+	foreach my $filter ( @filters ) {
+		debug "Applying filter $filter\n";
+		for ( $output ) {
+			m/$filter/ && do {
+				return 0;
+			}
+		}
+	}
+	# return true if no filter matches
+	return 1;
+
+}
+
+
 sub write_message {
 	# delay -- MARK -- messages
 	alarm $mark_timeout;
@@ -784,8 +875,7 @@ sub write_message {
 			# complex match so we can match hostname/time too:
 			for ($output) {
 				# seach for a pattern if applicable
-				if ( (! defined ${$rule}{'match'} ) || 
-						( m/${$rule}{'match'}/ ) ) {
+				if ( match( $output, $rule ) && filter( $output, $rule) ) {
 					if (defined ${$rule}{'file'}) {
 						# append the message to this file
 						if ( ${$rule}{'file'} eq "-" ) {
@@ -833,6 +923,7 @@ Options for lard:
     -K       Do not receive kernel messages from /proc/kmsg unders
              linux (on by default if /proc/kmsg exists)
     -n       Do not daemonize: stay in the foreground
+    -d       Debug mode, print out lots of info. Implies -n.
     -s       Send a running lard daemon a rotate signal. If no
              running instance is found, rotate files and exit
     -f conf  Specify an alternative configuration file
