@@ -28,7 +28,7 @@ use POSIX qw(strftime setsid);
 use vars qw(@rules %option %opts %sockets $mark_timeout);
 
 # define some globals
-my $VERSION = "0.1.6";
+my $VERSION = "0.1.7";
 my $stampfile = "/var/state/lard";
 my $id = $0;
 $id =~ s/.*\///;
@@ -146,6 +146,7 @@ if (exists $opts{'s'}) {
 	my $daemon;
 	$daemon = (<PID>);
 	close (PID);
+	debug "Attempting to send signal 10 to PID $daemon\n";
 	kill (10, $daemon) or die "error: could not send signal USR1 to process $daemon";
 	exit 0;
 }
@@ -191,6 +192,7 @@ $SIG{'CHLD'} = 'IGNORE';
 
 
 while(1) {
+	debug "Entering main program loop\n";
 	# handle messages as usual
 	while (my @ready = $select->can_read) {
 		foreach my $sock (@ready) {
@@ -202,6 +204,7 @@ while(1) {
 
 # add signal handler to trigger rotation
 sub catch_rotate_signal {
+	debug "Received rotation request signal (USR1)\n";
 	send_local ('notice', "$id: Received rotation request signal (USR1)");
 	rotate_all();
 }
@@ -220,6 +223,7 @@ sub write_pid {
 
 
 sub reload {
+	debug "Received restart request signal (HUP)\n";
 	send_local ('notice', "$id: Received restart request signal (HUP)");
 	&close_handles;
 	undef @rules;
@@ -230,6 +234,7 @@ sub reload {
 
 sub end {
 	# send out a syslog.notice that we are exiting, but only for
+	debug "$id: Shutting down\n";
 	($pid) or send_local ( 'notice', "$id: Shutting down");
 	unlink ("$pidfile") if not exists $opts{'s'};
 	&close_handles;
@@ -256,22 +261,26 @@ sub get_inputs {
 		$handle = &get_remote_socket;
 		$select->add($handle);
 		$sockets{fileno($handle)} = 'remote';
+		debug "Added remote reception socket\n";
 	}
 
 	$handle = &get_local_socket;
 	$select->add($handle);
 	$sockets{fileno($handle)} = 'local';
+	debug "Added local reception socket\n";
 
 	if ((-f '/proc/kmsg') && (! $opts{'K'})) {
 		$handle = &get_kmsg_socket;
 		$select->add($handle);
 		$sockets{fileno($handle)} = 'local';
+		debug "Added kernel message socket\n";
 	}
 }
 
 
 sub close_handles {
 	close $_ foreach $select->handles;
+	debug "Closed all sockets\n";
 	$select->remove ( $select->handles );
 	undef %sockets;
 }
@@ -306,6 +315,7 @@ sub get_local_socket() {
 	my $sock;
 	my $socketfile;
 	if ($option{'socket'}) {
+		debug "Using special socket " . $option{'socket'} . "\n";
 		$socketfile = $option{'socket'};
 	} else {
 		$socketfile = '/dev/log';
@@ -349,6 +359,7 @@ sub write_raw_message {
 	my $fac_code = $syslog_facilities_rv{$fac};
 	my $pri_code = $syslog_priorities_rv{$pri};
 	my $pri_tuple = $fac_code * 8 + $pri_code;
+	debug "write_raw_message: $fac, $pri\n";
 	write_message({
 	    'PRI' => "$pri_tuple",
 		'facility' => $fac,
@@ -367,6 +378,7 @@ sub send_remote {
 	my $host = shift;
 	my $port = 514;
 	my %message = %{ shift() };
+	debug "Sending message to remote host \"$host\": ". $message{'MSG'} . "\n";
 	$host = (split(/:/, $host))[0];
 	for ($host) {
 		/:/ && do {
@@ -407,6 +419,7 @@ sub parse_config {
 	local *CONF;
 	my $conf = "/etc/lard.conf";
 	$conf = $opts{'f'} if exists $opts{'f'};
+	debug "Processing config file \"$conf\"\n";
 	open(CONF, "$conf") or die "error: cannot open configuration file \"$opts{'f'}\"";
 	while (<CONF>) {
 		s/#.*$//g;
@@ -424,7 +437,6 @@ sub parse_config {
 	undef @matches;
 	# while ($word = shift @words) {
 	while ( local $_ = shift @words ) {
-		debug "Processing keyword: $_\n";
 		/^(?:file|pipe|command|host)$/ && do {
 			/^pipe$/ && do {
 				die "error: \"pipe\" rule not implemented yet";
@@ -440,16 +452,17 @@ sub parse_config {
 				undef @matches;
 			}
 			# create a new rule
-			debug "Started new $_ rule.\n";
+			debug "Started new $_ rule: \"$words[0]\"\n";
 			$rule{$_} = unquote ( shift @words );
 			next;
 		};
+		debug "  Processing keyword: $_\n";
 		/^(?:mark|socket|domain|listen|log|timeformat|format|keep|rotate|compress|filter|match|post)$/ && do {
 			if (! %rule) {
 				/^(?:filter|match|log|post)$/ && do {
 					die "error: \"$_\" keyword may only be used in rules";
 				};
-				debug "Setting/changing global value for $_ .\n";
+				debug "Changing global value for $_: \"" . $words[0] . "\"\n";
 				$option{$_} = unquote ( shift @words );
 			} else {
 				/^(?:socket|listen|mark)$/ && do {
@@ -458,13 +471,13 @@ sub parse_config {
 				# filter/match criteria
 				/^filter$/ && do {
 					my $f = unquote ( shift @words ) ;
-					debug "adding $_ : $f\n";
+					debug "    adding $_ : \"$f\"\n";
 					push @filters, $f ;
 					next;
 				};
 				/^match$/ && do {
 					my $f = unquote ( shift @words ) ;
-					debug "adding $_ : $f\n";
+					debug "    adding $_ : \"$f\"\n";
 					push @matches, $f ;
 					next;
 				};
@@ -473,6 +486,7 @@ sub parse_config {
 					$mark_timeout = unquote ( shift @words );
 					next;
 				};
+				debug "    adding $_: \"$words[0]\"\n";
 				$rule{$_} = unquote ( shift @words );
 				# create binary mask for facility.priority
 				/^log$/ && do {
@@ -570,6 +584,7 @@ sub get_timestamp {
 
 sub write_timestamp {
 	my $file = shift;
+	debug "Setting timestamp for \"$file\"\n";
 	my @lines;
 	local *STAMP;
 	if (open (STAMP, "$stampfile")) {
@@ -674,7 +689,8 @@ sub rotate_file {
 	my $file = shift;
 	my $keep = shift;
 	my $compress = shift;
-
+	
+	debug "Rotating \"$file\": ($keep, $compress)\n";
 	send_local ('debug', "$id: Rotating $file");
 
 	my $suffix;
@@ -691,9 +707,11 @@ sub rotate_file {
 		if ( -f "$file." . $num . "$suffix" ) {
 			if ($num == $keep) {
 				# delete the oldest if it's the last one to keep
+				debug "Removing \"$file.$num.$suffix\"\n";
 				unlink "$file." . $num . "$suffix";
 			} else {
 				# move them up
+				debug "Moving \"$file.$num.$suffix\" to \"$file." . ($num+1) . ".$suffix\"\n";
 				rename "$file." . $num . "$suffix", "$file." . ($num+1) . "$suffix";
 			}
 		}
@@ -701,12 +719,15 @@ sub rotate_file {
 	# now move the current one
 	if ( -f "$file" ) {
 		if ($keep == 0) {
+			debug "Removing \"$file\"\n";
 			unlink ("$file");
 		} else {
+			debug "Moving \"$file\" to \"$file.1\"\n";
 			rename "$file", "$file.1";
 		}
 		# and compress it
 		if (( $compress ne "none" ) && (fork == 0)) {
+			debug "Executing \"$compress $file.1\"\n";
 			exec("$compress $file.1");
 		}
 	}
@@ -720,12 +741,14 @@ sub read_message_from_socket {
 
 	my $max_msg_len	= 5000;
 	if ($sockets{fileno($sock)} eq 'remote' ) {
+		debug "Received a new message from remote socket\n";
 		# use the recv() method for INET sockets:
 		$sock->recv($message{'raw'}, $max_msg_len);
 		$message{'peerhost'} = gethostbyaddr($sock->peeraddr, AF_INET)
 		  || $sock->peerhost;
 		$message{'peerport'} = $sock->peerport;
 	} else {
+		debug "Received a new message from local socket\n";
 		# max message length for incoming data ([RFC 3164] limits this to 1024
 		# by default, though things might not follow the standards)
 		sysread($sock, $message{'raw'}, $max_msg_len) or die "error: cannot read from socket";
@@ -739,6 +762,7 @@ sub read_message_from_socket {
 	$message{'length'} = length( $message{'raw'} );
 
 	if ( $message{'length'} == 0 ) {
+		debug "message was empty, discarded\n";
 		next;
 	}
 
@@ -763,6 +787,7 @@ sub read_message_from_socket {
 	# TODO is syslog-ng adding \n to the data already?
 	chomp $header_msg;
 	if ( $header_msg =~ m/$HEADER_MSG_re_solaris/o ) {
+		debug "  looks like a generic syslog message\n";
 		(
 		 $message{'HEADER'},	 $message{'TIME'},
 		 $message{'HOSTNAME'}, $message{'MSG'}
@@ -771,12 +796,14 @@ sub read_message_from_socket {
 		# solaris' syslogd passes the fac.pri tuple, get rid if it:
 		$message{'MSG'} =~ s/ $message{'facility'}\.$message{'priority'}// ;
 	} elsif ( $header_msg =~ m/$HEADER_MSG_re_syslog_ng/o ) {
+		debug "  looks like a syslog-ng message\n";
 		(
 			$message{'HEADER'},	 $message{'TIME'},
 			$message{'HOSTNAME'}, $message{'MSG'}
 		)
 		 = ( $1, str2time ($2), $3, $4 );
 	} else {
+		debug "  looks like a headerless syslog message\n";
 		(
 		 $message{'HEADER'},	 $message{'TIME'},
 		 $message{'HOSTNAME'}, $message{'MSG'}
@@ -799,9 +826,9 @@ sub match {
 	my @matches = @{ $rule{'match'} } ;
 	# return true on first match
 	foreach my $match ( @matches ) {
-		debug "Applying match $match\n";
 		for ( $output ) {
 			m/$match/ && do {
+				debug "    Applied match $match\n";
 				return 1;
 			}
 		}
@@ -822,9 +849,9 @@ sub filter {
 	my @filters = @{ $rule{'filter'} } ;
 	# return true on first filter
 	foreach my $filter ( @filters ) {
-		debug "Applying filter $filter\n";
 		for ( $output ) {
 			m/$filter/ && do {
+				debug "    Applied filter $filter\n";
 				return 0;
 			}
 		}
@@ -840,6 +867,12 @@ sub write_message {
 	alarm $mark_timeout;
 	# write a message hash to the appropriate logfiles
 	my %message = %{ shift() };
+
+	debug "    hostname: \"$message{'HOSTNAME'}\"\n";
+	debug "    timestamp: \"$message{'TIME'}\"\n";
+	debug "    priority: \"$message{'priority_code'}\"\n";
+	debug "    facility: \"$message{'facility_code'}\"\n";
+	debug "    content: \"$message{'MSG'}\"\n";
 
 	# here we traverse our logging rules and apply the proper procedure
 	# (multiple actions possible)
@@ -881,6 +914,7 @@ sub write_message {
 						if ( ${$rule}{'file'} eq "-" ) {
 							print $output;
 						} else {
+							debug "    write to \"" . ${$rule}{'file'} . "\"\n";
 							# very bad writing below
 							local *LOG;
 							open ( LOG, ">>${$rule}{'file'}" ) or die "error: cannot open \"${$rule}{'file'}\" for writing";
@@ -893,6 +927,7 @@ sub write_message {
 					} elsif (defined ${$rule}{'command'}) {
 						# execute a command
 						chomp $output;
+						debug "    executing \"${$rule}{'command'} \'$output\'\n";
 						send_local ('debug', "$id: executing command: \"${$rule}{'command'} \'$output\'\"");
 						if (fork == 0) {
 							# $SIG{CHLD} = 'IGN' || waitpid(-1, WNOHANG)
@@ -1032,6 +1067,11 @@ Open a different configuration file instead of the default, which is
 
 Do not daemonize. The daemon doesn't run in the background. Usefull
 with the stdout logging possibility.
+
+=item B<-d>
+
+Display debug output. This implies -n, lard will not fork into the
+background.
 
 =item B<-s>
 
