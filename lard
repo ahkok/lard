@@ -770,18 +770,21 @@ sub read_message_from_socket {
 
 	if ( $message{'raw'} =~ m/$PRI_data_re/o ) {
 		( $message{'PRI'}, $header_msg ) = ( $1, $2 );
-		# decode facility/priority (see [RFC 2234] for PRI part values
-		if ( $message{'PRI'} ) {
-			$message{'priority_code'} = $message{'PRI'} % 8;
-			if ( exists $syslog_priorities{ $message{'priority_code'} } ) {
-				$message{'priority'} = $message{'priority_code'};
-				$message{'priority'} = $syslog_priorities{ $message{'priority_code'} };
-			}
-			$message{'facility_code'} = int( $message{'PRI'} / 8 );
-			if ( exists $syslog_facilities{ $message{'facility_code'} } ) {
-				$message{'facility'} = $syslog_facilities{ $message{'facility_code'} };
-			}
-		}
+	} else {
+		# generate a default PRI field if it is missing as kernel.info
+		$message{'PRI'} = 6;
+		$header_msg = $message{'raw'};
+	};
+	
+	# decode facility/priority (see [RFC 2234] for PRI part values
+	$message{'priority_code'} = $message{'PRI'} % 8;
+	if ( exists $syslog_priorities{ $message{'priority_code'} } ) {
+		$message{'priority'} = $message{'priority_code'};
+		$message{'priority'} = $syslog_priorities{ $message{'priority_code'} };
+	}
+	$message{'facility_code'} = int( $message{'PRI'} / 8 );
+	if ( exists $syslog_facilities{ $message{'facility_code'} } ) {
+		$message{'facility'} = $syslog_facilities{ $message{'facility_code'} };
 	}
 
 	# TODO is syslog-ng adding \n to the data already?
