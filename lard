@@ -123,7 +123,7 @@ sub debug {
 
 
 # set the mark timeout to a decent default (20 mintes):
-$mark_timeout = 1200;
+$option{'mark'} = 1200;
 
 # parse command-line options
 getopts 'dfhKnrs:v', \%opts;
@@ -190,7 +190,10 @@ $SIG{'ALRM'} = \&mark;
 # ignore CHLD exiting to kill off zombies
 $SIG{'CHLD'} = 'IGNORE';
 
+# start mark-ing timer
+alarm $option{'mark'};
 
+# main program loop
 while(1) {
 	debug "Entering main program loop\n";
 	# handle messages as usual
@@ -244,7 +247,7 @@ sub end {
 
 sub mark {
 	&write_raw_message('kern', 'info', '-- MARK --' );
-	alarm $mark_timeout;
+	alarm $option{'mark'};
 }
 
 
@@ -479,11 +482,6 @@ sub parse_config {
 					my $f = unquote ( shift @words ) ;
 					debug "    adding $_ : \"$f\"\n";
 					push @matches, $f ;
-					next;
-				};
-				# global options
-				/^mark$/ && do {
-					$mark_timeout = unquote ( shift @words );
 					next;
 				};
 				debug "    adding $_: \"$words[0]\"\n";
@@ -770,21 +768,18 @@ sub read_message_from_socket {
 
 	if ( $message{'raw'} =~ m/$PRI_data_re/o ) {
 		( $message{'PRI'}, $header_msg ) = ( $1, $2 );
-	} else {
-		# generate a default PRI field if it is missing as kernel.info
-		$message{'PRI'} = 6;
-		$header_msg = $message{'raw'};
-	};
-	
-	# decode facility/priority (see [RFC 2234] for PRI part values
-	$message{'priority_code'} = $message{'PRI'} % 8;
-	if ( exists $syslog_priorities{ $message{'priority_code'} } ) {
-		$message{'priority'} = $message{'priority_code'};
-		$message{'priority'} = $syslog_priorities{ $message{'priority_code'} };
-	}
-	$message{'facility_code'} = int( $message{'PRI'} / 8 );
-	if ( exists $syslog_facilities{ $message{'facility_code'} } ) {
-		$message{'facility'} = $syslog_facilities{ $message{'facility_code'} };
+		# decode facility/priority (see [RFC 2234] for PRI part values
+		if ( $message{'PRI'} ) {
+			$message{'priority_code'} = $message{'PRI'} % 8;
+			if ( exists $syslog_priorities{ $message{'priority_code'} } ) {
+				$message{'priority'} = $message{'priority_code'};
+				$message{'priority'} = $syslog_priorities{ $message{'priority_code'} };
+			}
+			$message{'facility_code'} = int( $message{'PRI'} / 8 );
+			if ( exists $syslog_facilities{ $message{'facility_code'} } ) {
+				$message{'facility'} = $syslog_facilities{ $message{'facility_code'} };
+			}
+		}
 	}
 
 	# TODO is syslog-ng adding \n to the data already?
@@ -867,7 +862,7 @@ sub filter {
 
 sub write_message {
 	# delay -- MARK -- messages
-	alarm $mark_timeout;
+	alarm $option{'mark'};
 	# write a message hash to the appropriate logfiles
 	my %message = %{ shift() };
 
