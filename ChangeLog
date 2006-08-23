@@ -1,3 +1,7 @@
+0.1.7 - 20060822
+	* Fix mark keyword implementation
+	* Fix priority/facility typle decoding for all message types
+
 0.1.6 - 20051031
 
 	* Add -d option which implies -n - debug info
