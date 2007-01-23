@@ -1,3 +1,6 @@
+0.1.8 - 20070123
+	* Fix kmsg log entries showing up as empty log messages
+
 0.1.7 - 20060822
 	* Fix mark keyword implementation
 	* Fix priority/facility typle decoding for all message types
