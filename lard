@@ -25,10 +25,10 @@ use Getopt::Std;
 use Date::Parse;
 use POSIX qw(strftime setsid);
 
-use vars qw(@rules %option %opts %sockets $mark_timeout);
+use vars qw(@rules %option %opts %sockets $mark_timeout %kmsg_buffer);
 
 # define some globals
-my $VERSION = "0.1.8";
+my $VERSION = "0.1.9";
 my $stampfile = "/var/state/lard";
 my $id = $0;
 $id =~ s/.*\///;
@@ -275,7 +275,7 @@ sub get_inputs {
 	if ((-f '/proc/kmsg') && (! $opts{'K'})) {
 		$handle = &get_kmsg_socket;
 		$select->add($handle);
-		$sockets{fileno($handle)} = 'local';
+		$sockets{fileno($handle)} = 'kmsg';
 		debug "Added kernel message socket\n";
 	}
 }
@@ -753,6 +753,23 @@ sub read_message_from_socket {
 		$message{'peerhost'} = hostname();
 	}
 
+	if ($sockets{fileno($sock)} eq 'kmsg' ) {
+		# append message to what's in buffer
+		if (defined(%kmsg_buffer)) {
+			debug "  appended message to kmsg buffer";
+			$message{'raw'} = $kmsg_buffer{'raw'} . $message{'raw'};
+		}
+
+		# if message is \n terminated, clear buffer and print
+		if ($message{'raw'} =~ m/\n$/) {
+			undef(%kmsg_buffer);
+		# else, clear message and hold buffer, don't print
+		} else {
+			debug "  unterminated kmsg, buffering";
+			return;
+		}
+	}
+
 	# tag with the current time:
 	$message{'time_recv'} = time;
 	
@@ -768,7 +785,7 @@ sub read_message_from_socket {
 
 	if (!( $message{'raw'} =~ m/$PRI_data_re/o )) {
 		debug "  inserting default priority/facility\n";
-		$message{'PRI'} = "<6>";
+		$message{'PRI'} = "<7>";
 		$header_msg = $message{'raw'};
 	} else {
 		( $message{'PRI'}, $header_msg ) = ( $1, $2 );
