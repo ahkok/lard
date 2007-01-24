@@ -1,3 +1,7 @@
+0.1.9 - 20070124
+	* Fix kernel messages being 'split up' by buffering non-newline
+	  terminated messages from kmsg socket
+
 0.1.8 - 20070123
 	* Fix kmsg log entries showing up as empty log messages
 
